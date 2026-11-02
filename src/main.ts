@@ -66,7 +66,7 @@ function showHome() {
       <div class="stat"><b>${c.newLeft}</b><span>new today</span></div>
       <div class="stat"><b>${c.started}</b><span>of ${c.total} started</span></div>
     </div>
-    <button class="btn primary wide" id="start">${anything ? "Start" : "Nothing due: learn something new"}</button>
+    <button class="btn primary wide" id="start">${anything ? "Start" : c.started < c.total ? "Nothing due: learn something new" : "Nothing due: practise anyway"}</button>
     <p class="muted" style="margin-top:12px">${p.reviewing} cards in long-term memory · ${p.answers} answers so far</p>
     <div class="row"><button class="link" id="settings">Settings and your data</button></div>
   `;
@@ -314,12 +314,25 @@ function showPlacementResults() {
 function showCaughtUp() {
   const c = deck.counts();
   const more = c.started < c.total;
+  const learning = deck.stillLearning();
+  // A card can be due but held back only because its country was just asked about.
+  const readyNow = learning.count > 0 && learning.minutes === 0;
+  const plural = learning.count === 1 ? "card you're still learning comes" : "cards you're still learning come";
+  const when = readyNow ? "now" : learning.minutes === 1 ? "in about a minute" : `in about ${learning.minutes} minutes`;
   panel.innerHTML = `<h2>All caught up</h2>
-    <p>Nothing is due right now${session?.answered ? `, and you got ${session.correct} of ${session.answered} right this round` : ""}.</p>
+    <p>Nothing else is due right now${session?.answered ? `, and you got ${session.correct} of ${session.answered} right this round` : ""}.</p>
+    ${learning.count ? `<p class="muted">${learning.count} ${plural} back ${when}.</p>` : ""}
     <div class="row">
-      ${more ? `<button class="btn primary" id="more">Learn 5 more</button>` : ""}
+      ${readyNow ? `<button class="btn primary" id="again">Keep going</button>` : ""}
+      ${more ? `<button class="btn ${readyNow ? "" : "primary"}" id="more">Learn 5 more</button>` : ""}
       <button class="btn" id="finish">Finish</button>
     </div>`;
+  if (readyNow) {
+    $("#again").onclick = () => {
+      session!.recent = [];
+      nextQuestion();
+    };
+  }
   if (more) {
     $("#more").onclick = () => {
       deck.allowMoreNew(5);

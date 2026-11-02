@@ -95,15 +95,14 @@ export class Deck {
   }
 
   /**
-   * Picks the next question, or null when there is nothing left for today. Countries in
-   * `recent` are avoided where possible, so one question does not give away the next.
+   * Picks the next question, or null when there is nothing left to ask right now.
+   * `recent` lists the countries just asked about, most recent first. The last one is never
+   * asked again straight away, and the others are avoided where possible, so one question
+   * does not give away the next.
    */
   next(recent: string[] = []): Prompt | null {
     const now = Date.now();
-    const enabled = this.state.settings.types;
-    const started = Object.entries(this.state.cards)
-      .map(([key, card]) => ({ key, card, ...parseKey(key) }))
-      .filter((c) => enabled[c.type] && this.world.byId.has(c.id));
+    const started = this.started().filter((c) => c.id !== recent[0]);
 
     const pick = <T extends { id: string }>(list: T[]) => list.find((c) => !recent.includes(c.id)) ?? list[0];
     const toPrompt = (c: { key: string; id: string; type: QuestionType }, isNew: boolean): Prompt => ({
@@ -117,22 +116,42 @@ export class Deck {
     if (due.length) return toPrompt(pick(due), false);
 
     if (this.newLeftToday() > 0) {
+      const enabled = this.state.settings.types;
       const window = this.candidates
         .filter((c) => enabled[c.type] && !this.state.cards[c.key])
         .slice(0, NEW_CARD_WINDOW)
         .map((c) => ({ ...c, id: c.country.id }));
       const pool = window.filter((c) => !recent.includes(c.id));
-      const from = pool.length ? pool : window;
+      const from = pool.length ? pool : window.filter((c) => c.id !== recent[0]);
       // Random, but leaning towards the front of the line.
       const choice = from[Math.floor(from.length * Math.random() ** 1.5)];
       if (choice) return toPrompt(choice, true);
     }
 
+    // Cards still being learned may come back a little early, but only with other questions
+    // in between: otherwise a missed card would be asked again and again in a row.
     const learning = started
       .filter((c) => c.card.state !== State.Review && c.card.dueAt.getTime() <= now + LEARN_AHEAD_MS)
+      .filter((c) => !recent.includes(c.id))
       .sort(byDue);
-    if (learning.length) return toPrompt(pick(learning), false);
+    if (learning.length) return toPrompt(learning[0], false);
     return null;
+  }
+
+  /** Cards still being learned, and how many minutes until the first of them is due. */
+  stillLearning(): { count: number; minutes: number } {
+    const learning = this.started().filter((c) => c.card.state !== State.Review);
+    if (!learning.length) return { count: 0, minutes: 0 };
+    const soonest = Math.min(...learning.map((c) => c.card.dueAt.getTime()));
+    return { count: learning.length, minutes: Math.max(0, Math.ceil((soonest - Date.now()) / 60_000)) };
+  }
+
+  /** Cards the player has started, for the question types that are switched on. */
+  private started() {
+    const enabled = this.state.settings.types;
+    return Object.entries(this.state.cards)
+      .map(([key, card]) => ({ key, card, ...parseKey(key) }))
+      .filter((c) => enabled[c.type] && this.world.byId.has(c.id));
   }
 
   /** Records an answer. Returns an undo token so a wrong verdict can be overruled. */
