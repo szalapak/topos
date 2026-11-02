@@ -1,0 +1,31 @@
+{
+  "name": "topos",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "data": "node scripts/build-data.mjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "topojson-client": "^3.1.0",
+    "topojson-simplify": "^3.0.3",
+    "ts-fsrs": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "^3.1.1",
+    "@types/geojson": "^7946.0.16",
+    "@types/topojson-client": "^3.1.5",
+    "@types/topojson-simplify": "^3.0.3",
+    "@vite-pwa/assets-generator": "^2.0.0",
+    "flag-icons": "^7.6.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0",
+    "world-atlas": "^2.0.2",
+    "world-countries": "^5.1.0"
+  }
+}

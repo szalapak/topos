@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#1d4e6b" />
+    <meta name="description" content="Learn the countries of the world with spaced repetition." />
+    <link rel="icon" href="./favicon.ico" sizes="48x48" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon-180x180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Topos" />
+    <title>Topos</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <span class="brand">Topos</span>
+        <span id="counts" class="counts"></span>
+        <button id="done" class="link" hidden>Done</button>
+      </header>
+      <div class="globe-wrap">
+        <canvas id="globe" aria-label="Globe. Drag to turn, pinch or scroll to zoom, tap to choose a country."></canvas>
+        <div class="zoom">
+          <button id="zoom-in" aria-label="Zoom in">+</button>
+          <button id="zoom-out" aria-label="Zoom out">−</button>
+        </div>
+        <div id="loading" class="loading">Loading the world…</div>
+      </div>
+      <main id="panel" class="panel" aria-live="polite"></main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
