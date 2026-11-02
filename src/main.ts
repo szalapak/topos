@@ -37,7 +37,37 @@ async function init() {
   $("#zoom-in").onclick = () => globe.zoomBy(1.6);
   $("#zoom-out").onclick = () => globe.zoomBy(1 / 1.6);
   doneButton.onclick = () => (session?.placement ? showPlacementResults() : showHome());
+  trackVisibleArea();
   showHome();
+}
+
+/**
+ * Fits the layout to what the phone keyboard leaves visible. Android can resize the page
+ * itself (see the viewport meta tag), but iOS lays the keyboard over the page instead.
+ */
+function trackVisibleArea() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  const update = () => {
+    // Pinch-zooming shrinks the visual viewport too, and the layout should not follow that.
+    const zoomed = vv.scale > 1.01;
+    if (zoomed) {
+      root.style.removeProperty("--app-height");
+      root.style.removeProperty("--app-top");
+    } else {
+      root.style.setProperty("--app-height", `${vv.height}px`);
+      root.style.setProperty("--app-top", `${vv.offsetTop}px`);
+    }
+    root.classList.toggle("short", (zoomed ? window.innerHeight : vv.height) < 560);
+  };
+  vv.addEventListener("scroll", update);
+  vv.addEventListener("resize", () => {
+    update();
+    const focused = document.activeElement;
+    if (focused instanceof HTMLInputElement && panel.contains(focused)) focused.scrollIntoView({ block: "nearest" });
+  });
+  update();
 }
 
 // ---------------------------------------------------------------- home
