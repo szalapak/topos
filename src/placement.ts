@@ -32,6 +32,7 @@ export class Placement {
   readonly total = STEPS.length * SKILLS.length;
   private levels = { ...START_LEVEL };
   private answered: Record<Skill, number> = { map: 0, flag: 0, capital: 0 };
+  /** Countries already asked about, in any skill: none comes up twice in one round. */
   private asked = new Set<string>();
   private correct: string[] = [];
   /** Rank of the least famous country answered correctly, per skill; -1 for none yet. */
@@ -54,12 +55,12 @@ export class Placement {
     const level = this.levels[skill];
     // A few countries closest to the current level, choosing one at random among them.
     const options = this.world.countries
-      .filter((c) => !this.asked.has(`${skill}|${c.id}`) && this.deck.prompt(c.id, type))
+      .filter((c) => !this.asked.has(c.id) && this.deck.prompt(c.id, type))
       .sort((a, b) => Math.abs(a.rank - level) - Math.abs(b.rank - level))
       .slice(0, 5);
     const country = options[Math.floor(Math.random() * options.length)];
     if (!country) return null;
-    this.asked.add(`${skill}|${country.id}`);
+    this.asked.add(country.id);
     return { ...this.deck.prompt(country.id, type)!, isNew: false };
   }
 

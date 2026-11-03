@@ -15,6 +15,9 @@ export const QUESTION_TYPES: { type: QuestionType; label: string; offset: number
 // well after, so they are not asked while the country is still fresh in mind.
 
 export type Grade = (typeof Rating)["Again" | "Hard" | "Good"];
+
+/** How well a country is known, for colouring the globe. */
+export type Knowledge = "weak" | "learning" | "known";
 export { Rating };
 
 export interface Settings {
@@ -53,6 +56,10 @@ const NEW_CARD_WINDOW = 20;
 /** Cards marked as already known get their first check spread over this many days. */
 const KNOWN_FIRST_CHECK_DAYS = [2, 28];
 const DAY_MS = 86_400_000;
+/** A card counts as known once FSRS expects it to be remembered this many days or more. */
+const KNOWN_STABILITY_DAYS = 14;
+/** Below this estimated chance of recall, a known card that has gone unchecked counts as fading. */
+const FADING_RECALL = 0.7;
 
 const DEFAULT_SETTINGS: Settings = {
   types: { locate: true, identify: true, flag: true, capital: true, capitalLocate: true },
@@ -152,6 +159,29 @@ export class Deck {
     return Object.entries(this.state.cards)
       .map(([key, card]) => ({ key, card, ...parseKey(key) }))
       .filter((c) => enabled[c.type] && this.world.byId.has(c.id));
+  }
+
+  /**
+   * How well each started country is known, judged from its cards of the given types (only
+   * those switched on). Countries with no such cards are left out.
+   */
+  knowledge(types: readonly QuestionType[]): Map<string, Knowledge> {
+    const now = Date.now();
+    const answered = new Set(this.state.log.map(([key]) => key));
+    const scores = new Map<string, number[]>();
+    for (const c of this.started()) {
+      if (!types.includes(c.type)) continue;
+      // Cards marked known by the placement round have not been asked yet: trust the estimate.
+      const score = answered.has(c.key) ? cardScore(c.card, now) : 2;
+      scores.set(c.id, [...(scores.get(c.id) ?? []), score]);
+    }
+    const result = new Map<string, Knowledge>();
+    for (const [id, list] of scores) {
+      // Averaged, so a well-known map with a shaky capital reads as "learning", not "weak".
+      const mean = list.reduce((a, b) => a + b, 0) / list.length;
+      result.set(id, mean < 0.5 ? "weak" : mean >= 1.75 ? "known" : "learning");
+    }
+    return result;
   }
 
   /** Records an answer. Returns an undo token so a wrong verdict can be overruled. */
@@ -269,6 +299,17 @@ function buildCandidates(world: World): Prompt[] {
     }
   }
   return list.sort((a, b) => a.order - b.order);
+}
+
+/** 0 for a card that keeps being missed, 1 while being learned, 2 once known. */
+function cardScore(card: Card, now: number): number {
+  const missedAgain = card.state === State.Relearning || (card.state === State.Learning && card.reps >= 2);
+  if (missedAgain || (card.lapses >= 2 && card.stability < 7)) return 0;
+  if (card.stability < KNOWN_STABILITY_DAYS) return 1;
+  // FSRS's forgetting curve, roughly: recall is 90% after `stability` days, then keeps falling.
+  const days = card.lastReviewAt ? (now - card.lastReviewAt.getTime()) / DAY_MS : 0;
+  const recall = 1 / (1 + days / (9 * card.stability));
+  return recall < FADING_RECALL ? 1 : 2;
 }
 
 function parseKey(key: string) {

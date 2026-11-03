@@ -1,9 +1,9 @@
 import "./style.css";
 import { AnswerSet, type Verdict } from "./answers";
 import { loadWorld, type Country, type World } from "./data";
-import { Deck, QUESTION_TYPES, Rating, type Grade, type Prompt } from "./deck";
+import { Deck, QUESTION_TYPES, Rating, type Grade, type Knowledge, type Prompt } from "./deck";
 import { Globe } from "./globe";
-import { Placement } from "./placement";
+import { Placement, SKILLS, type Skill } from "./placement";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const panel = $("#panel");
@@ -26,6 +26,8 @@ interface Session {
 }
 let session: Session | null = null;
 let lastSession: Session | null = null;
+/** Which skill the globe is coloured by between rounds; null for all of them together. */
+let globeSkill: Skill | null = null;
 
 async function init() {
   world = await loadWorld();
@@ -78,6 +80,7 @@ function showHome() {
   doneButton.hidden = true;
   globe.onTap = undefined;
   globe.setHighlights([]);
+  globe.setKnowledge(new Map());
   globe.spin(true);
   updateCounts();
 
@@ -98,8 +101,10 @@ function showHome() {
     </div>
     <button class="btn primary wide" id="start">${anything ? "Start" : c.started < c.total ? "Nothing due: learn something new" : "Nothing due: practise anyway"}</button>
     <p class="muted" style="margin-top:12px">${p.reviewing} cards in long-term memory · ${p.answers} answers so far</p>
+    <div id="legend"></div>
     <div class="row"><button class="link" id="settings">Settings and your data</button></div>
   `;
+  showKnowledge($("#legend"));
   $("#start").onclick = () => {
     if (!anything) deck.allowMoreNew(5);
     startRound();
@@ -123,6 +128,40 @@ function showWelcome() {
   $("#placement").onclick = startPlacement;
   $("#scratch").onclick = () => startRound();
   $("#settings").onclick = showSettings;
+}
+
+const KNOWLEDGE_LABELS: [Knowledge, string][] = [
+  ["known", "Known"],
+  ["learning", "Learning"],
+  ["weak", "Needs work"],
+];
+
+/** Colours the globe by what the player knows, with a key and a choice of skill in `legend`. */
+function showKnowledge(legend: HTMLElement) {
+  const types = globeSkill ? SKILLS.find((s) => s.skill === globeSkill)!.types : QUESTION_TYPES.map((q) => q.type);
+  const knowledge = deck.knowledge(types);
+  globe.setKnowledge(knowledge);
+  if (!deck.counts().started) {
+    legend.innerHTML = "";
+    return;
+  }
+
+  const tally = (kind: Knowledge) => [...knowledge.values()].filter((k) => k === kind).length;
+  const modes: [Skill | null, string][] = [[null, "All"], ...SKILLS.map((s): [Skill, string] => [s.skill, s.label])];
+  legend.innerHTML = `<div class="legend">
+    <div class="modes" role="group" aria-label="Colour the globe by">
+      ${modes.map(([skill, label]) => `<button data-skill="${skill ?? ""}" aria-pressed="${skill === globeSkill}">${label}</button>`).join("")}
+    </div>
+    <div class="key">
+      ${KNOWLEDGE_LABELS.map(([kind, label]) => `<span><i class="swatch ${kind}"></i>${label} <b>${tally(kind)}</b></span>`).join("")}
+    </div>
+  </div>`;
+  legend.querySelectorAll<HTMLButtonElement>("[data-skill]").forEach((b) => {
+    b.onclick = () => {
+      globeSkill = (b.dataset.skill || null) as Skill | null;
+      showKnowledge(legend);
+    };
+  });
 }
 
 function startRound() {
@@ -151,6 +190,8 @@ function nextQuestion() {
   doneButton.hidden = false;
   globe.spin(false);
   globe.setHighlights([]);
+  // The colours would give answers away during a round.
+  globe.setKnowledge(new Map());
   updateCounts();
   if (!prompt) return s.placement ? showPlacementResults() : showCaughtUp();
 
@@ -333,10 +374,12 @@ function showPlacementResults() {
            weeks, so anything you've forgotten gets caught. New cards start from where you are.`
         : "No problem: you'll start with the best-known countries and build up from there."
     }</p>
+    <div id="legend"></div>
     <div class="row">
       <button class="btn primary" id="go">Start learning</button>
       <button class="btn" id="home">Home</button>
     </div>`;
+  showKnowledge($("#legend"));
   $("#go").onclick = () => startRound();
   $("#home").onclick = showHome;
 }
@@ -356,7 +399,9 @@ function showCaughtUp() {
       ${readyNow ? `<button class="btn primary" id="again">Keep going</button>` : ""}
       ${more ? `<button class="btn ${readyNow ? "" : "primary"}" id="more">Learn 5 more</button>` : ""}
       <button class="btn" id="finish">Finish</button>
-    </div>`;
+    </div>
+    <div id="legend"></div>`;
+  showKnowledge($("#legend"));
   if (readyNow) {
     $("#again").onclick = () => {
       session!.recent = [];

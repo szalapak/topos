@@ -19,6 +19,9 @@
   --globe-target: #f0a830;
   --globe-correct: #4caf73;
   --globe-wrong: #e0654f;
+  --globe-known: #3a9e96;
+  --globe-learning: #a6d3cb;
+  --globe-weak: #d29ab3;
 
   color-scheme: light;
 }
@@ -45,6 +48,9 @@
     --globe-target: #f0a830;
     --globe-correct: #45b46d;
     --globe-wrong: #e0654f;
+    --globe-known: #52c7bb;
+    --globe-learning: #3f8784;
+    --globe-weak: #a2668a;
 
     color-scheme: dark;
   }
@@ -347,6 +353,74 @@ form.answer input {
 .stat span {
   font-size: 12px;
   color: var(--muted);
+}
+
+.legend {
+  margin: 16px 0 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.modes {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.modes button {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+.modes button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.key span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--globe-border);
+}
+
+.swatch.known {
+  background: var(--globe-known);
+}
+
+.swatch.learning {
+  background: var(--globe-learning);
+}
+
+.swatch.weak {
+  background: var(--globe-weak);
 }
 
 fieldset {

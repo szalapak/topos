@@ -2,6 +2,7 @@ import { geoContains, geoDistance, geoGraticule10, geoOrthographic, geoPath } fr
 import type { GeoPath, GeoPermissibleObjects, GeoProjection } from "d3-geo";
 import type { Position } from "geojson";
 import { DETAIL_LEVELS, type Shape, type World } from "./data";
+import type { Knowledge } from "./deck";
 
 export type HighlightKind = "target" | "correct" | "wrong";
 
@@ -13,6 +14,7 @@ const MARKER_SEA_HIT_PX = 16;
 /** Highlighted shapes narrower than this get a ring drawn around them. */
 const RING_BELOW_PX = 22;
 const TAP_SLOP_PX = 7;
+const KNOWLEDGE_LEVELS: Knowledge[] = ["weak", "learning", "known"];
 const MIN_ZOOM = 0.9;
 const MAX_ZOOM = 40;
 
@@ -39,6 +41,7 @@ export class Globe {
   private zoom = 1;
   private rotation: [number, number] = [-15, -25];
   private highlights = new Map<string, HighlightKind>();
+  private knowledge = new Map<string, Knowledge>();
   private markers: { id: string; x: number; y: number }[] = [];
   private colors: Record<string, string> = {};
   private frame: number | null = null;
@@ -69,6 +72,12 @@ export class Globe {
 
   setHighlights(entries: [string, HighlightKind][]) {
     this.highlights = new Map(entries);
+    this.requestRender();
+  }
+
+  /** Colours countries by how well they are known. An empty map shows plain land. */
+  setKnowledge(knowledge: Map<string, Knowledge>) {
+    this.knowledge = knowledge;
     this.requestRender();
   }
 
@@ -159,7 +168,7 @@ export class Globe {
 
   private readColors() {
     const css = getComputedStyle(document.documentElement);
-    for (const key of ["ocean", "graticule", "land", "border", "rim", "target", "correct", "wrong", "marker"]) {
+    for (const key of ["ocean", "graticule", "land", "border", "rim", "target", "correct", "wrong", "marker", "known", "learning", "weak"]) {
       this.colors[key] = css.getPropertyValue(`--globe-${key}`).trim();
     }
   }
@@ -211,13 +220,20 @@ export class Globe {
 
     const visible = this.visibleShapes();
     const level = this.detailLevel(scale);
-    ctx.beginPath();
-    for (const s of visible) path(s.outlines[level]);
-    ctx.fillStyle = colors.land;
-    ctx.fill();
+    // Land is filled once per colour (plain, then each knowledge level), so every outline is
+    // projected only once per frame.
+    const byFill = new Map<string, Shape[]>([["land", []], ...KNOWLEDGE_LEVELS.map((k): [string, Shape[]] => [k, []])]);
+    for (const s of visible) byFill.get((s.id && this.knowledge.get(s.id)) || "land")!.push(s);
     ctx.strokeStyle = colors.border;
     ctx.lineWidth = 0.6;
-    ctx.stroke();
+    for (const [fill, shapes] of byFill) {
+      if (!shapes.length) continue;
+      ctx.beginPath();
+      for (const s of shapes) path(s.outlines[level]);
+      ctx.fillStyle = colors[fill];
+      ctx.fill();
+      ctx.stroke();
+    }
 
     for (const [id, kind] of this.highlights) {
       const shape = this.world.shapeById.get(id);
@@ -244,7 +260,8 @@ export class Globe {
         this.markers.push({ id: s.id, x: p[0], y: p[1] });
         ctx.beginPath();
         ctx.arc(p[0], p[1], MARKER_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = kind ? colors[kind] : colors.marker;
+        const known = this.knowledge.get(s.id);
+        ctx.fillStyle = kind ? colors[kind] : known ? colors[known] : colors.marker;
         ctx.fill();
         ctx.strokeStyle = colors.border;
         ctx.lineWidth = 1;
