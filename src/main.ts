@@ -23,9 +23,15 @@ interface Session {
   recent: string[];
   /** Set during the placement round, where answers go to the level estimate instead of the deck. */
   placement?: Placement;
+  /** True once the player has been asked to do a few more before stopping. */
+  nudged?: boolean;
 }
 let session: Session | null = null;
 let lastSession: Session | null = null;
+/** How many recent countries `Deck.next()` is told about. */
+const RECENT_KEPT = 8;
+/** Stopping before this many answers brings a gentle "a few more?" once per round. */
+const NUDGE_BELOW = 8;
 /** Which skill the globe is coloured by between rounds; null for all of them together. */
 let globeSkill: Skill | null = null;
 
@@ -38,7 +44,7 @@ async function init() {
   $("#loading").remove();
   $("#zoom-in").onclick = () => globe.zoomBy(1.6);
   $("#zoom-out").onclick = () => globe.zoomBy(1 / 1.6);
-  doneButton.onclick = () => (session?.placement ? showPlacementResults() : showHome());
+  doneButton.onclick = () => (session?.placement ? showPlacementResults() : stopRound());
   trackVisibleArea();
   showHome();
 }
@@ -88,7 +94,6 @@ function showHome() {
 
   const c = deck.counts();
   const p = deck.progress();
-  const anything = c.due + c.newLeft > 0;
   panel.innerHTML = `
     <h1>Learn the world, a few countries at a time</h1>
     <p class="muted">Play for as long as you like and stop whenever you want. Anything you
@@ -96,19 +101,16 @@ function showHome() {
     ${lastSession && lastSession.answered ? `<p>Last round: <b>${lastSession.correct}</b> of <b>${lastSession.answered}</b> right.</p>` : ""}
     <div class="stats">
       <div class="stat"><b>${c.due}</b><span>due now</span></div>
-      <div class="stat"><b>${c.newLeft}</b><span>new today</span></div>
+      <div class="stat"><b>${c.learning}</b><span>learning</span></div>
       <div class="stat"><b>${c.started}</b><span>of ${c.total} started</span></div>
     </div>
-    <button class="btn primary wide" id="start">${anything ? "Start" : c.started < c.total ? "Nothing due: learn something new" : "Nothing due: practise anyway"}</button>
+    <button class="btn primary wide" id="start">Start</button>
     <p class="muted" style="margin-top:12px">${p.reviewing} cards in long-term memory · ${p.answers} answers so far</p>
     <div id="legend"></div>
     <div class="row"><button class="link" id="settings">Settings and your data</button></div>
   `;
   showKnowledge($("#legend"));
-  $("#start").onclick = () => {
-    if (!anything) deck.allowMoreNew(5);
-    startRound();
-  };
+  $("#start").onclick = () => startRound();
   $("#settings").onclick = showSettings;
 }
 
@@ -178,8 +180,8 @@ function updateCounts() {
   const c = deck.counts();
   const p = session?.placement;
   if (p) counts.textContent = `Placement ${p.done} of ${p.total}`;
-  else if (session) counts.textContent = `${session.correct}/${session.answered} right · ${c.due} due · ${c.newLeft} new`;
-  else counts.textContent = deck.isFresh ? "" : `${c.due} due · ${c.newLeft} new`;
+  else if (session) counts.textContent = `${session.correct}/${session.answered} right · ${c.due} due`;
+  else counts.textContent = deck.isFresh ? "" : `${c.due} due · ${c.learning} learning`;
 }
 
 // ---------------------------------------------------------------- questions
@@ -193,7 +195,7 @@ function nextQuestion() {
   // The colours would give answers away during a round.
   globe.setKnowledge(new Map());
   updateCounts();
-  if (!prompt) return s.placement ? showPlacementResults() : showCaughtUp();
+  if (!prompt) return s.placement ? showPlacementResults() : showNothingToAsk();
 
   const { country, type } = prompt;
   const intro = s.placement
@@ -289,7 +291,7 @@ function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
   }
   s.answered++;
   if (right) s.correct++;
-  s.recent = [prompt.country.id, ...s.recent.filter((id) => id !== prompt.country.id)].slice(0, 3);
+  s.recent = [prompt.country.id, ...s.recent.filter((id) => id !== prompt.country.id)].slice(0, RECENT_KEPT);
   showFeedback(prompt, verdict, detail, overrule);
 }
 
@@ -384,37 +386,36 @@ function showPlacementResults() {
   $("#home").onclick = showHome;
 }
 
-function showCaughtUp() {
-  const c = deck.counts();
-  const more = c.started < c.total;
-  const learning = deck.stillLearning();
-  // A card can be due but held back only because its country was just asked about.
-  const readyNow = learning.count > 0 && learning.minutes === 0;
-  const plural = learning.count === 1 ? "card you're still learning comes" : "cards you're still learning come";
-  const when = readyNow ? "now" : learning.minutes === 1 ? "in about a minute" : `in about ${learning.minutes} minutes`;
-  panel.innerHTML = `<h2>All caught up</h2>
-    <p>Nothing else is due right now${session?.answered ? `, and you got ${session.correct} of ${session.answered} right this round` : ""}.</p>
-    ${learning.count ? `<p class="muted">${learning.count} ${plural} back ${when}.</p>` : ""}
+/** Ends a round, first suggesting a few more if it was very short. */
+function stopRound() {
+  const s = session;
+  if (!s || s.nudged || s.answered === 0 || s.answered >= NUDGE_BELOW) return showHome();
+  s.nudged = true;
+  doneButton.hidden = true;
+  globe.onTap = undefined;
+  const left = NUDGE_BELOW - s.answered;
+  panel.innerHTML = `<h2>Stopping already?</h2>
+    <p>You've answered ${s.answered}. ${left === 1 ? "One more" : `Another ${left}`} would help this round stick, but
+      it's up to you.</p>
     <div class="row">
-      ${readyNow ? `<button class="btn primary" id="again">Keep going</button>` : ""}
-      ${more ? `<button class="btn ${readyNow ? "" : "primary"}" id="more">Learn 5 more</button>` : ""}
-      <button class="btn" id="finish">Finish</button>
-    </div>
-    <div id="legend"></div>`;
-  showKnowledge($("#legend"));
-  if (readyNow) {
-    $("#again").onclick = () => {
-      session!.recent = [];
-      nextQuestion();
-    };
-  }
-  if (more) {
-    $("#more").onclick = () => {
-      deck.allowMoreNew(5);
-      nextQuestion();
-    };
-  }
-  $("#finish").onclick = showHome;
+      <button class="btn primary" id="more">Keep going</button>
+      <button class="btn" id="stop">Stop here</button>
+    </div>`;
+  $("#more").onclick = nextQuestion;
+  $("#stop").onclick = showHome;
+  $<HTMLButtonElement>("#more").focus({ preventScroll: true });
+}
+
+/** Only reached when every question type is switched off. */
+function showNothingToAsk() {
+  panel.innerHTML = `<h2>Nothing to ask</h2>
+    <p>Every question type is switched off. Turn one back on in Settings.</p>
+    <div class="row">
+      <button class="btn primary" id="settings">Settings</button>
+      <button class="btn" id="home">Home</button>
+    </div>`;
+  $("#settings").onclick = showSettings;
+  $("#home").onclick = showHome;
 }
 
 // ---------------------------------------------------------------- settings
@@ -429,7 +430,8 @@ function showSettings() {
     </fieldset>
     <fieldset><legend>New cards per day</legend>
       <input type="number" id="per-day" min="0" max="100" value="${s.newPerDay}">
-      <p class="muted">You can always ask for more once you're caught up.</p>
+      <p class="muted">Your pace, not a limit: after this many, new cards come more and more slowly so
+        reviews don't pile up, but you can keep playing. 0 means no new cards.</p>
     </fieldset>
     <fieldset><legend>Placement round</legend>
       <p class="muted">Already know more than the game thinks? Take the placement round again to skip ahead.

@@ -33,8 +33,11 @@ interface Saved {
   version: 1;
   cards: Record<string, Card>;
   log: LogEntry[];
-  /** New cards introduced per local date, plus any extra the player asked for that day. */
-  days: Record<string, { introduced: number; extra: number }>;
+  /**
+   * New cards introduced per local date. `extra` is left over from the old daily allowance
+   * ("Learn 5 more") and is no longer used.
+   */
+  days: Record<string, { introduced: number; extra?: number }>;
   settings: Settings;
   /** When the placement round was finished, if ever. */
   placedAt?: number;
@@ -48,11 +51,11 @@ export interface Prompt {
 }
 
 const STORAGE_KEY = "topos:v1";
-/** When nothing is due, cards still being learned may come back this much early. */
-const LEARN_AHEAD_MS = 20 * 60_000;
 const MAX_LOG = 50_000;
 /** New cards are drawn at random from this many next in line, so the order is not predictable. */
 const NEW_CARD_WINDOW = 20;
+/** Cards already started avoid only this many of the most recent countries. */
+const REVIEW_AVOIDS_RECENT = 3;
 /** Cards marked as already known get their first check spread over this many days. */
 const KNOWN_FIRST_CHECK_DAYS = [2, 28];
 const DAY_MS = 86_400_000;
@@ -61,6 +64,38 @@ const KNOWN_STABILITY_DAYS = 14;
 /** Below this estimated chance of recall, a known card that has gone unchecked counts as fading. */
 const FADING_RECALL = 0.7;
 
+// How the next question is picked: see `next()`. Weights are relative to a card that has just
+// fallen due, which weighs 1.
+/** A card missed last time it was asked. Higher than a due card so it comes back this round. */
+const MISSED_WEIGHT = 4;
+/** ...or this fraction of everything else together, when that is more. */
+const MISSED_SHARE = 0.35;
+/**
+ * A missed card is held back for the first of these many other questions and is fully back
+ * in the running after the second. Time counts too, for a card missed in an earlier visit.
+ * Each further miss in a row doubles the wait, up to `MISSED_STRETCH_CAP` times, so a country
+ * that will not stick is spaced out rather than drilled.
+ */
+const MISSED_GAP: [number, number] = [2, 7];
+const MISSED_FULL_AFTER_MS = 5 * 60_000;
+const MISSED_STRETCH_CAP = 2;
+/** Overdue cards weigh more the longer they are overdue, up to this multiple of their interval. */
+const OVERDUE_CAP = 3;
+/** All cards not yet due together weigh at most this much, however many there are. */
+const AHEAD_MAX_WEIGHT = 1;
+/** New cards as a group. Lower when many cards are still being learned or past the day's pace. */
+const NEW_WEIGHT = 2.5;
+/** ...or, until the day's pace is reached, this fraction of the reviews' weight when that is more. */
+const NEW_SHARE = 0.2;
+/** No new cards while this many are still being learned. */
+const LEARNING_LIMIT = 12;
+/**
+ * Each earlier miss makes a due or nearly due card this much more likely, up to `STRUGGLE_CAP`
+ * misses, so countries that have been hard come round a little more often.
+ */
+const STRUGGLE_STEP = 0.25;
+const STRUGGLE_CAP = 4;
+
 const DEFAULT_SETTINGS: Settings = {
   types: { locate: true, identify: true, flag: true, capital: true, capitalLocate: true },
   newPerDay: 10,
@@ -68,6 +103,15 @@ const DEFAULT_SETTINGS: Settings = {
 
 export class Deck {
   private candidates: Prompt[];
+  /** Answers given so far, counting from the start of the log. */
+  private answered = 0;
+  /**
+   * Per card: when it was last asked (as a count of answers), times missed in all, and misses
+   * in a row up to now (absent when the last answer was right).
+   */
+  private lastAsked = new Map<string, number>();
+  private misses = new Map<string, number>();
+  private missedInARow = new Map<string, number>();
 
   private constructor(
     private scheduler: Scheduler,
@@ -75,6 +119,23 @@ export class Deck {
     private state: Saved,
   ) {
     this.candidates = buildCandidates(world);
+    this.readHistory();
+  }
+
+  private readHistory() {
+    this.answered = 0;
+    this.lastAsked.clear();
+    this.misses.clear();
+    this.missedInARow.clear();
+    for (const [key, grade] of this.state.log) this.remember(key, grade);
+  }
+
+  private remember(key: string, grade: Grade) {
+    this.lastAsked.set(key, ++this.answered);
+    if (grade === Rating.Again) {
+      this.misses.set(key, (this.misses.get(key) ?? 0) + 1);
+      this.missedInARow.set(key, (this.missedInARow.get(key) ?? 0) + 1);
+    } else this.missedInARow.delete(key);
   }
 
   static async open(world: World): Promise<Deck> {
@@ -102,16 +163,25 @@ export class Deck {
   }
 
   /**
-   * Picks the next question, or null when there is nothing left to ask right now.
-   * `recent` lists the countries just asked about, most recent first. The last one is never
-   * asked again straight away, and the others are avoided where possible, so one question
-   * does not give away the next.
+   * Picks the next question at random, weighted by how much each card needs asking, or null
+   * when there is nothing at all to ask. `recent` lists the countries just asked about, most
+   * recent first: the last one is never asked again straight away, and the few before it are
+   * avoided where possible, so one question does not give away the next. New cards avoid all
+   * of `recent`, so a country's map and name questions do not arrive close together.
+   *
+   * Every started card gets a weight (see `need()`): a card missed last time weighs most once a
+   * few other questions have passed (and keeps a fair share however much else is due), a due
+   * card weighs 1 and more the longer it is overdue, and cards not yet due share a small weight
+   * that favours the nearly due. New cards form one more option (see `newWeight()`).
    */
   next(recent: string[] = []): Prompt | null {
     const now = Date.now();
-    const started = this.started().filter((c) => c.id !== recent[0]);
+    const all = this.started();
+    const learning = all.filter((c) => this.isLearning(c.key, c.card)).length;
+    const avoid = recent.slice(0, REVIEW_AVOIDS_RECENT);
+    const away = all.filter((c) => !avoid.includes(c.id));
+    const started = away.length ? away : all.filter((c) => c.id !== recent[0]);
 
-    const pick = <T extends { id: string }>(list: T[]) => list.find((c) => !recent.includes(c.id)) ?? list[0];
     const toPrompt = (c: { key: string; id: string; type: QuestionType }, isNew: boolean): Prompt => ({
       key: c.key,
       country: this.world.byId.get(c.id)!,
@@ -119,38 +189,86 @@ export class Deck {
       isNew,
     });
 
-    const due = started.filter((c) => c.card.dueAt.getTime() <= now).sort(byDue);
-    if (due.length) return toPrompt(pick(due), false);
-
-    if (this.newLeftToday() > 0) {
-      const enabled = this.state.settings.types;
-      const window = this.candidates
-        .filter((c) => enabled[c.type] && !this.state.cards[c.key])
-        .slice(0, NEW_CARD_WINDOW)
-        .map((c) => ({ ...c, id: c.country.id }));
-      const pool = window.filter((c) => !recent.includes(c.id));
-      const from = pool.length ? pool : window.filter((c) => c.id !== recent[0]);
-      // Random, but leaning towards the front of the line.
-      const choice = from[Math.floor(from.length * Math.random() ** 1.5)];
-      if (choice) return toPrompt(choice, true);
+    const options: { weight: number; take: () => Prompt; missed?: boolean }[] = [];
+    const ahead: { weight: number; card: (typeof started)[number] }[] = [];
+    for (const c of started) {
+      const { kind, weight } = this.need(c.key, c.card, now);
+      if (kind === "ahead") ahead.push({ weight, card: c });
+      else options.push({ weight, take: () => toPrompt(c, false), missed: kind === "missed" });
+    }
+    const aheadTotal = ahead.reduce((sum, a) => sum + a.weight, 0);
+    if (aheadTotal > 0) {
+      const take = () => toPrompt(pickWeighted(ahead)!.card, false);
+      options.push({ weight: Math.min(aheadTotal, AHEAD_MAX_WEIGHT), take });
     }
 
-    // Cards still being learned may come back a little early, but only with other questions
-    // in between: otherwise a missed card would be asked again and again in a row.
-    const learning = started
-      .filter((c) => c.card.state !== State.Review && c.card.dueAt.getTime() <= now + LEARN_AHEAD_MS)
-      .filter((c) => !recent.includes(c.id))
-      .sort(byDue);
-    if (learning.length) return toPrompt(learning[0], false);
-    return null;
+    const enabled = this.state.settings.types;
+    const window = this.candidates
+      .filter((c) => enabled[c.type] && !this.state.cards[c.key])
+      .slice(0, NEW_CARD_WINDOW)
+      .map((c) => ({ ...c, id: c.country.id }));
+    const pool = window.filter((c) => !recent.includes(c.id));
+    const newOnes = pool.length ? pool : window.filter((c) => c.id !== recent[0]);
+    if (newOnes.length) {
+      // Random, but leaning towards the front of the line.
+      const take = () => toPrompt(newOnes[Math.floor(newOnes.length * Math.random() ** 1.5)], true);
+      const reviews = options.reduce((sum, o) => sum + (o.missed ? 0 : o.weight), 0);
+      options.push({ weight: this.newWeight(learning, reviews), take });
+    }
+
+    // With many cards due, missed cards keep their share, so they still come back this round.
+    const others = options.reduce((sum, o) => sum + (o.missed ? 0 : o.weight), 0);
+    const boost = Math.max(1, (MISSED_SHARE * others) / MISSED_WEIGHT);
+    for (const o of options) if (o.missed) o.weight *= boost;
+
+    const choice = pickWeighted(options);
+    if (choice) return choice.take();
+    // Nothing weighs anything, e.g. only a card missed a moment ago: ask any started card.
+    const any = started[Math.floor(Math.random() * started.length)];
+    if (any) return toPrompt(any, false);
+    return newOnes.length ? toPrompt(newOnes[0], true) : null;
   }
 
-  /** Cards still being learned, and how many minutes until the first of them is due. */
-  stillLearning(): { count: number; minutes: number } {
-    const learning = this.started().filter((c) => c.card.state !== State.Review);
-    if (!learning.length) return { count: 0, minutes: 0 };
-    const soonest = Math.min(...learning.map((c) => c.card.dueAt.getTime()));
-    return { count: learning.length, minutes: Math.max(0, Math.ceil((soonest - Date.now()) / 60_000)) };
+  /** Why a card might be asked next and how strongly; see `next()`. */
+  private need(key: string, card: Card, now: number): { kind: "missed" | "due" | "ahead"; weight: number } {
+    const inARow = this.missedInARow.get(key);
+    if (inARow) {
+      // Waits longer after each miss in a row, and gets no extra weight for them: a card missed
+      // again and again would otherwise nag.
+      const stretch = 2 ** Math.min(inARow - 1, MISSED_STRETCH_CAP);
+      const [from, full] = MISSED_GAP.map((n) => n * stretch);
+      const gap = this.answered - (this.lastAsked.get(key) ?? -Infinity);
+      const since = now - (card.lastReviewAt?.getTime() ?? 0);
+      const ready = Math.max((gap - from) / (full - from), since / (MISSED_FULL_AFTER_MS * stretch));
+      return { kind: "missed", weight: MISSED_WEIGHT * clamp(ready, 0, 1) };
+    }
+    const struggle = 1 + STRUGGLE_STEP * Math.min(this.misses.get(key) ?? 0, STRUGGLE_CAP);
+    // How far through its interval the card is: 1 when due, 2 when overdue by a whole interval.
+    const last = card.lastReviewAt?.getTime() ?? now;
+    const progress = (now - last) / Math.max(card.dueAt.getTime() - last, 60_000);
+    if (progress >= 1) return { kind: "due", weight: Math.min(progress, OVERDUE_CAP) * struggle };
+    // Steep, so a card is only asked early when it is nearly due anyway.
+    return { kind: "ahead", weight: progress ** 4 * struggle };
+  }
+
+  /** Missed last time, or not yet through FSRS's short learning steps. */
+  private isLearning(key: string, card: Card) {
+    return this.missedInARow.has(key) || card.state === State.Learning || card.state === State.Relearning;
+  }
+
+  /**
+   * New cards as one option: a fair share of picks until the day's pace (the "new cards per
+   * day" setting) is reached, then less and less, and none while many cards are being learned.
+   * `reviews` is the weight of the due and not-yet-due cards it competes with.
+   */
+  private newWeight(learning: number, reviews: number) {
+    const pace = this.state.settings.newPerDay;
+    if (pace <= 0) return 0;
+    const room = Math.max(0, 1 - learning / LEARNING_LIMIT);
+    const past = this.today().introduced - pace;
+    if (past < 0) return room * Math.max(NEW_WEIGHT, NEW_SHARE * reviews);
+    // Halves with every further day's worth, so new cards slow down but never stop.
+    return room * NEW_WEIGHT * 0.5 ** (past / pace);
   }
 
   /** Cards the player has started, for the question types that are switched on. */
@@ -167,12 +285,11 @@ export class Deck {
    */
   knowledge(types: readonly QuestionType[]): Map<string, Knowledge> {
     const now = Date.now();
-    const answered = new Set(this.state.log.map(([key]) => key));
     const scores = new Map<string, number[]>();
     for (const c of this.started()) {
       if (!types.includes(c.type)) continue;
       // Cards marked known by the placement round have not been asked yet: trust the estimate.
-      const score = answered.has(c.key) ? cardScore(c.card, now) : 2;
+      const score = this.lastAsked.has(c.key) ? cardScore(c.card, now) : 2;
       scores.set(c.id, [...(scores.get(c.id) ?? []), score]);
     }
     const result = new Map<string, Knowledge>();
@@ -194,15 +311,23 @@ export class Deck {
     this.state.log.push([prompt.key, grade, now.getTime()]);
     if (this.state.log.length > MAX_LOG) this.state.log.splice(0, this.state.log.length - MAX_LOG);
     if (!before) this.today().introduced++;
+    const { key } = prompt;
+    const history = [this.answered, this.lastAsked.get(key), this.misses.get(key), this.missedInARow.get(key)] as const;
+    this.remember(key, grade);
     this.save();
 
     return () => {
-      if (before) this.state.cards[prompt.key] = before;
+      if (before) this.state.cards[key] = before;
       else {
-        delete this.state.cards[prompt.key];
+        delete this.state.cards[key];
         this.today().introduced--;
       }
       this.state.log.pop();
+      const [answered, asked, misses, inARow] = history;
+      this.answered = answered;
+      restore(this.lastAsked, key, asked);
+      restore(this.misses, key, misses);
+      restore(this.missedInARow, key, inARow);
       this.save();
     };
   }
@@ -226,23 +351,19 @@ export class Deck {
     this.save();
   }
 
-  allowMoreNew(n: number) {
-    this.today().extra += n;
-    this.save();
-  }
-
+  /** Cards due now, cards still being learned, and how many of all the cards are started. */
   counts() {
     const now = Date.now();
-    const enabled = this.state.settings.types;
     let due = 0;
-    let started = 0;
-    for (const [key, card] of Object.entries(this.state.cards)) {
-      if (!enabled[parseKey(key).type]) continue;
-      started++;
-      if (card.dueAt.getTime() <= now) due++;
+    let learning = 0;
+    const started = this.started();
+    for (const c of started) {
+      if (this.isLearning(c.key, c.card)) learning++;
+      else if (c.card.dueAt.getTime() <= now) due++;
     }
+    const enabled = this.state.settings.types;
     const total = this.candidates.filter((c) => enabled[c.type]).length;
-    return { due, newLeft: Math.min(this.newLeftToday(), total - started), started, total };
+    return { due, learning, started: started.length, total };
   }
 
   /** Cards that have graduated to long-term review, and total answers given. */
@@ -260,22 +381,19 @@ export class Deck {
     const parsed = revive(JSON.parse(text));
     if (parsed?.version !== 1 || typeof parsed.cards !== "object") throw new Error("Not a Topos progress file");
     this.state = { ...emptyState(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
+    this.readHistory();
     this.save();
   }
 
   reset() {
     this.state = { ...emptyState(), settings: this.state.settings };
+    this.readHistory();
     this.save();
-  }
-
-  private newLeftToday() {
-    const d = this.today();
-    return Math.max(0, this.state.settings.newPerDay + d.extra - d.introduced);
   }
 
   private today() {
     const key = localDate();
-    return (this.state.days[key] ??= { introduced: 0, extra: 0 });
+    return (this.state.days[key] ??= { introduced: 0 });
   }
 
   private save() {
@@ -312,13 +430,34 @@ function cardScore(card: Card, now: number): number {
   return recall < FADING_RECALL ? 1 : 2;
 }
 
+/** Picks one item at random, in proportion to its weight; null if none weighs anything. */
+function pickWeighted<T extends { weight: number }>(items: T[]): T | null {
+  const total = items.reduce((sum, i) => sum + i.weight, 0);
+  if (total <= 0) return null;
+  let r = Math.random() * total;
+  let last: T | null = null;
+  for (const item of items) {
+    if (item.weight <= 0) continue;
+    last = item;
+    r -= item.weight;
+    if (r < 0) return item;
+  }
+  // Only reached through rounding.
+  return last;
+}
+
+function restore<K, V>(map: Map<K, V>, key: K, value: V | undefined) {
+  if (value === undefined) map.delete(key);
+  else map.set(key, value);
+}
+
+function clamp(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 function parseKey(key: string) {
   const [id, type] = key.split("|");
   return { id, type: type as QuestionType };
-}
-
-function byDue(a: { card: Card }, b: { card: Card }) {
-  return a.card.dueAt.getTime() - b.card.dueAt.getTime();
 }
 
 function emptyState(): Saved {

@@ -19,27 +19,7 @@ same feedback:
   stability of 14 days or more, and cards from the placement round count as known until
   first asked.
 
-### 2. Open-ended sessions instead of a daily allowance
-Today a round runs until nothing is due and the day's new cards (10 by default) are used up,
-then shows "All caught up" and "Learn 5 more". The wish: press start and keep going for as
-long as you like, with no fixed allowance. (Player feedback, Nov 2026: a priority.)
-
-- Pick the next card at random, weighted by need: overdue and often-missed cards much more
-  likely, cards being learned fairly likely, well-known cards rarely, new cards mixed in at a
-  steady rate. Not strictly "the most overdue card next", which feels mechanical and was
-  behind the missed-card-repeats bug.
-- Keep FSRS for the underlying memory model; only the choice of what to ask next changes.
-  Reviewing a card well before it is due should count for less (FSRS handles this already,
-  stability barely grows on early reviews).
-- New cards still need some brake, so a long session does not introduce 80 countries that
-  then all fall due together. Perhaps hold back new cards while many are still being learned.
-- Gentle nudge if someone stops very early ("a few more?"), never a wall.
-- Play several real sessions before shipping and check it feels natural: no near repeats,
-  a sensible mix of old and new, missed cards return after a few questions.
-- The "new per day" setting and the `days` part of the saved progress may become unused;
-  keep reading old saves without errors.
-
-### 3. Questions on population, GDP per capita and languages
+### 2. Questions on population, GDP per capita and languages
 The original goal included these, typed rather than multiple choice. The data is already loaded
 (`population`, `gdpPerCapita`, `languages` in `public/data/countries.json`) but nothing asks about it.
 
@@ -54,14 +34,19 @@ The original goal included these, typed rather than multiple choice. The data is
   arrive after the map, flag and capital cards. The placement round (`src/placement.ts`)
   would need a skill for them too, or they can start from scratch.
 
-### 4. Placement can flood the review queue for strong players
+### 3. Placement can flood the review queue for strong players
 A player who knows nearly everything gets about 160 countries x 5 question types, so roughly
 750 cards marked known, spread over 2 to 28 days: around 25 to 30 checks a day for a month.
 Options: spread over a longer period when there are many, cap checks per day, or only mark
 one or two card types per country as known and let the rest be checked lazily.
 See `markKnown` in `src/deck.ts` and `KNOWN_FIRST_CHECK_DAYS`.
 
-### 5. Test properly on a real phone
+With open-ended rounds this no longer blocks anything, but a big due pile crowds out new
+cards (they get a share only until the day's pace, then shrink). In simulation, a player whose
+placement overestimated them had 200 or so cards due after four weeks and was getting about
+two new cards a day.
+
+### 4. Test properly on a real phone
 Only tested in a desktop browser at phone size so far. Check:
 - pinch to zoom and drag on the globe, and whether tiny-country taps feel fair;
 - the on-screen keyboard: iPhone Safari ignores `interactive-widget=resizes-content`, so the
@@ -86,11 +71,13 @@ Only tested in a desktop browser at phone size so far. Check:
   refresh, because the app is cached for offline use (vite-plugin-pwa).
 - **Faster first load**: the coarser map outlines and bounding circles are computed in the
   browser on every load (`src/data.ts`). They could be precomputed in `scripts/build-data.mjs`.
-- **Home screen**: mention cards still being learned and when they come back, as the
-  caught-up screen already does.
+- **Tune question picking from real use**: the weights are constants near the top of
+  `src/deck.ts` (`MISSED_WEIGHT`, `NEW_SHARE` and so on), tuned against a simulated player
+  (Nov 2026). Worth checking against real logs after a few weeks: how soon missed cards
+  return, how many new cards arrive per day, whether due piles keep growing.
 - **Automated tests**: none yet. Good candidates: `src/answers.ts` (typo rules, "Niger" must
   not pass for "Nigeria"), the card picking in `src/deck.ts` (a missed card must not repeat
-  straight away), and the placement estimates (simulated players should land at roughly 80
+  straight away; a simulated player over a few weeks, as used for tuning, with fake time), and the placement estimates (simulated players should land at roughly 80
   to 85% of what they know).
 - **Accessibility**: globe questions need a pointer. A keyboard alternative would help.
 
@@ -105,10 +92,12 @@ Only tested in a desktop browser at phone size so far. Check:
 - Globe with drag, pinch and scroll zoom; forgiving taps near borders and island nations.
 - Five question types: find on globe, name the highlighted country, flag, capital, capital
   to globe.
-- FSRS spaced repetition, any session length, progress in the browser, export and import.
+- FSRS spaced repetition, progress in the browser, export and import.
 - Placement round for new players.
 - New cards drawn at random from a window, ordered by how well known a country is.
 - A missed card no longer repeats straight away (fixed after first real use).
 - The placement round never asks about the same country twice, even across skills.
 - The globe shows what you know between rounds: known, learning and needs work, per skill.
+- Open-ended rounds: questions picked at random, weighted by need (missed, due, nearly due,
+  new), no daily allowance or "all caught up" wall, a gentle nudge when stopping very early.
 - Published to GitHub Pages on every push to `main`.
