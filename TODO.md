@@ -14,25 +14,28 @@ same feedback:
 - Capitals mode could put a dot on the capital once it is known. This needs capital
   coordinates, which `public/data/countries.json` does not have yet (only the country's
   `latlng`), so `scripts/build-data.mjs` would need a source for them.
-- Think about what other modes could show as more question types arrive (population, GDP).
+- The Numbers mode colours by how well population and GDP per capita are known. It could
+  also show the figures themselves, e.g. shading countries by population.
 - Tune the thresholds once there is real progress to look at: "known" is currently an FSRS
   stability of 14 days or more, and cards from the placement round count as known until
   first asked.
 
-### 2. Questions on population, GDP per capita and languages
-The original goal included these, typed rather than multiple choice. The data is already loaded
-(`population`, `gdpPerCapita`, `languages` in `public/data/countries.json`) but nothing asks about it.
+### 2. Languages questions, and tuning the number questions
+Population and GDP per capita questions are in (see Done). Still to do:
 
-- Numbers should be graded by closeness, not exactness. A starting idea: within about 15% is
-  Good, within 2x is Hard, further off is Again. Accept "34m", "34 million", "34,000,000" and so on.
-  Logarithmic error is probably the right measure.
+- Tune how close counts once there is real use to look at: `TOLERANCE` in `src/numbers.ts`
+  (within 15% is Good, within 1.3x Hard, for both population and GDP per capita). GDP per
+  capita in US dollars moves with exchange rates, so a figure you learned may drift out of
+  range after a yearly data refresh.
+- Total GDP could be its own question type later (`gdpTotal`), never a setting that changes
+  what the `gdpPerCapita` cards mean. It needs `NY.GDP.MKTP.CD` added to `scripts/build-data.mjs`.
 - Languages: partial credit when the main one is named but a second is missed. Note that
   `world-countries` lists *official* languages, which is not always what is mainly spoken
   (e.g. English in many African countries). May need a better source or a curated "main
   languages" list.
 - New question types go in `QUESTION_TYPES` in `src/deck.ts`, with a large `offset` so they
   arrive after the map, flag and capital cards. The placement round (`src/placement.ts`)
-  would need a skill for them too, or they can start from scratch.
+  would need a skill for them too, or they can start from scratch (as the number ones do).
 
 ### 3. Placement can flood the review queue for strong players
 A player who knows nearly everything gets about 160 countries x 5 question types, so roughly
@@ -75,10 +78,11 @@ Only tested in a desktop browser at phone size so far. Check:
   `src/deck.ts` (`MISSED_WEIGHT`, `NEW_SHARE` and so on), tuned against a simulated player
   (Nov 2026). Worth checking against real logs after a few weeks: how soon missed cards
   return, how many new cards arrive per day, whether due piles keep growing.
-- **Automated tests**: none yet. Good candidates: `src/answers.ts` (typo rules, "Niger" must
-  not pass for "Nigeria"), the card picking in `src/deck.ts` (a missed card must not repeat
-  straight away; a simulated player over a few weeks, as used for tuning, with fake time), and the placement estimates (simulated players should land at roughly 80
-  to 85% of what they know).
+- **More automated tests**: `npm test` covers `src/answers.ts` and `src/numbers.ts`. Still
+  untested: the card picking in `src/deck.ts` (a missed card must not repeat straight away; a
+  simulated player over a few weeks, as used for tuning, with fake time), and the placement
+  estimates (simulated players should land at roughly 80 to 85% of what they know). Both
+  need `localStorage` and the world data faked in Node.
 - **Accessibility**: globe questions need a pointer. A keyboard alternative would help.
 
 ## Data upkeep
@@ -101,3 +105,8 @@ Only tested in a desktop browser at phone size so far. Check:
 - Open-ended rounds: questions picked at random, weighted by need (missed, due, nearly due,
   new), no daily allowance or "all caught up" wall, a gentle nudge when stopping very early.
 - Published to GitHub Pages on every push to `main`.
+- Population (typed in millions) and GDP per capita (US dollars, market rates) questions,
+  graded by closeness. Accepts "34", "34m", "34 million", "34,000,000", "45k" and decimal
+  commas. Countries under 2,000 people (Vatican City) are not asked their population.
+  The feedback card shows both figures for every country.
+- Unit tests with Node's built-in runner (`npm test`), run before every deploy.

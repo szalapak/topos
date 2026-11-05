@@ -2,7 +2,8 @@
 
 A geography trainer built on spaced repetition. It asks about countries in several ways (find it
 on a globe, name the highlighted country, name the flag, type the capital, find the country from
-its capital), remembers what you find hard, and lets you play for as long as you like. Each
+its capital, guess its population or GDP per capita), remembers what you find hard, and lets you
+play for as long as you like. Each
 question is picked at random, weighted towards cards you missed, cards that are due, and a
 steady trickle of new ones.
 
@@ -18,7 +19,8 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:5173. `npm test` runs the unit tests in `tests/` with Node's
+built-in test runner (Node 24 or newer, which runs TypeScript directly).
 
 ## Project layout
 
@@ -30,6 +32,8 @@ Then open http://localhost:5173.
 - `src/placement.ts` is the optional first-visit quiz that estimates what a player already knows.
 - `src/answers.ts` checks typed answers, forgiving small typos only when they can't be
   mistaken for another country or capital.
+- `src/numbers.ts` reads typed numbers ("34m", "34 million", "45k"), grades them by how close
+  they are, and formats figures for display.
 - `src/main.ts` is the screens: home, questions, feedback and settings.
 
 ## Data sources

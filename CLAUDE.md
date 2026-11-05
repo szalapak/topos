@@ -8,6 +8,9 @@ what each file does and `TODO.md` for what to work on next.
 - `npm run dev`: local dev server on http://localhost:5173 (also the `dev` entry in
   `.claude/launch.json` for the preview browser).
 - `npm run build`: type-check and production build into `dist/`. Run before committing.
+- `npm test`: unit tests in `tests/` (Node's built-in runner, no extra dependencies). Tests
+  import source files with the `.ts` extension, and `tests/` sits outside `tsconfig.json`'s
+  `include`, so `npm run build` does not type-check them. Deploys run the tests first.
 - `npm run data`: rebuild `public/data/` and `public/flags/`. Needs network access (World Bank
   API). The output is committed, so builds and deploys never need it.
 

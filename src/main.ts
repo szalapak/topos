@@ -1,9 +1,10 @@
 import "./style.css";
 import { AnswerSet, type Verdict } from "./answers";
 import { loadWorld, type Country, type World } from "./data";
-import { Deck, QUESTION_TYPES, Rating, type Grade, type Knowledge, type Prompt } from "./deck";
+import { AMOUNT_TYPES, Deck, QUESTION_TYPES, Rating, type Grade, type Knowledge, type Prompt, type QuestionType } from "./deck";
 import { Globe } from "./globe";
-import { Placement, SKILLS, type Skill } from "./placement";
+import { describeMiss, formatDollars, formatPopulation, gradeAmount, readDollars, readPopulation } from "./numbers";
+import { Placement, SKILLS } from "./placement";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const panel = $("#panel");
@@ -32,8 +33,13 @@ let lastSession: Session | null = null;
 const RECENT_KEPT = 8;
 /** Stopping before this many answers brings a gentle "a few more?" once per round. */
 const NUDGE_BELOW = 8;
-/** Which skill the globe is coloured by between rounds; null for all of them together. */
-let globeSkill: Skill | null = null;
+/** Ways to colour the globe between rounds, besides "All". */
+const GLOBE_MODES: { id: string; label: string; types: readonly QuestionType[] }[] = [
+  ...SKILLS.map((s) => ({ id: s.skill, label: s.label, types: s.types })),
+  { id: "numbers", label: "Numbers", types: AMOUNT_TYPES },
+];
+/** Which mode the globe is coloured by between rounds; null for all question types together. */
+let globeMode: string | null = null;
 
 async function init() {
   world = await loadWorld();
@@ -140,7 +146,7 @@ const KNOWLEDGE_LABELS: [Knowledge, string][] = [
 
 /** Colours the globe by what the player knows, with a key and a choice of skill in `legend`. */
 function showKnowledge(legend: HTMLElement) {
-  const types = globeSkill ? SKILLS.find((s) => s.skill === globeSkill)!.types : QUESTION_TYPES.map((q) => q.type);
+  const types = GLOBE_MODES.find((m) => m.id === globeMode)?.types ?? QUESTION_TYPES.map((q) => q.type);
   const knowledge = deck.knowledge(types);
   globe.setKnowledge(knowledge);
   if (!deck.counts().started) {
@@ -149,18 +155,18 @@ function showKnowledge(legend: HTMLElement) {
   }
 
   const tally = (kind: Knowledge) => [...knowledge.values()].filter((k) => k === kind).length;
-  const modes: [Skill | null, string][] = [[null, "All"], ...SKILLS.map((s): [Skill, string] => [s.skill, s.label])];
+  const modes: [string | null, string][] = [[null, "All"], ...GLOBE_MODES.map((m): [string, string] => [m.id, m.label])];
   legend.innerHTML = `<div class="legend">
     <div class="modes" role="group" aria-label="Colour the globe by">
-      ${modes.map(([skill, label]) => `<button data-skill="${skill ?? ""}" aria-pressed="${skill === globeSkill}">${label}</button>`).join("")}
+      ${modes.map(([id, label]) => `<button data-mode="${id ?? ""}" aria-pressed="${id === globeMode}">${label}</button>`).join("")}
     </div>
     <div class="key">
       ${KNOWLEDGE_LABELS.map(([kind, label]) => `<span><i class="swatch ${kind}"></i>${label} <b>${tally(kind)}</b></span>`).join("")}
     </div>
   </div>`;
-  legend.querySelectorAll<HTMLButtonElement>("[data-skill]").forEach((b) => {
+  legend.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
     b.onclick = () => {
-      globeSkill = (b.dataset.skill || null) as Skill | null;
+      globeMode = b.dataset.mode || null;
       showKnowledge(legend);
     };
   });
@@ -264,6 +270,48 @@ function nextQuestion() {
       $("#skip").onclick = () => finish(prompt, { result: "wrong" }, { skipped: true });
       break;
     }
+    case "population":
+    case "gdpPerCapita": {
+      const population = type === "population";
+      const question = population
+        ? `What is the population of <b>${esc(the(country.name))}</b>?`
+        : `What is the GDP per capita of <b>${esc(the(country.name))}</b>?`;
+      const hint = population
+        ? "In millions: 68 for 68 million, 0.5 for half a million."
+        : "In US dollars at market exchange rates: 45000 or 45k.";
+      // A number keypad on phones; typed letters ("34m", "45k") still work on a keyboard.
+      panel.innerHTML = `${intro}<h2>${question}</h2>
+        <form class="answer" autocomplete="off">
+          ${population ? "" : `<span class="unit">$</span>`}
+          <input id="typed" type="text" inputmode="decimal" enterkeyhint="done" autocorrect="off"
+            spellcheck="false" placeholder="${population ? "Millions" : "US dollars"}" aria-label="Your answer"
+            aria-describedby="hint">
+          ${population ? `<span class="unit">million</span>` : ""}
+          <button class="btn primary">Check</button>
+        </form>
+        <p class="muted hint" id="hint">${hint}</p>
+        <button class="btn" id="skip">I don't know</button>`;
+      globe.setHighlights([[country.id, "target"]]);
+      globe.flyTo(country.id);
+      globe.onTap = undefined;
+      const input = $<HTMLInputElement>("#typed");
+      input.focus();
+      panel.querySelector("form")!.onsubmit = (e) => {
+        e.preventDefault();
+        if (!input.value.trim()) return;
+        const guess = population ? readPopulation(input.value) : readDollars(input.value);
+        const actual = population ? country.population?.value : country.gdpPerCapita?.value;
+        if (guess === null || actual === undefined) {
+          const hintEl = $("#hint");
+          hintEl.textContent = `That doesn't look like a number. ${hint}`;
+          hintEl.classList.add("error");
+          return;
+        }
+        finish(prompt, { result: gradeAmount(guess, actual, type) }, { typed: input.value.trim(), guess });
+      };
+      $("#skip").onclick = () => finish(prompt, { result: "wrong" }, { skipped: true });
+      break;
+    }
   }
 }
 
@@ -272,6 +320,8 @@ interface AnswerDetail {
   typed?: string;
   /** Map shape tapped by mistake on a globe question. */
   tappedId?: string;
+  /** The number read from a typed population or GDP answer. */
+  guess?: number;
 }
 
 function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
@@ -310,9 +360,11 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
   globe.flyTo(country.id);
 
   const expected = type === "capital" ? country.capitals.join(" / ") : country.name;
+  const amount = (AMOUNT_TYPES as readonly QuestionType[]).includes(type);
   let headline: string;
   let detail = "";
-  if (verdict.result === "exact") headline = `<p class="verdict good">Correct</p>`;
+  if (amount) ({ headline, detail } = amountFeedback(prompt, verdict, answer));
+  else if (verdict.result === "exact") headline = `<p class="verdict good">Correct</p>`;
   else if (verdict.result === "close") {
     headline = `<p class="verdict close">Nearly: it's spelt ${esc(expected)}</p>`;
   } else {
@@ -324,8 +376,9 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
     else detail = `The answer is <b>${esc(expected)}</b>.`;
   }
 
-  // Overruling only makes sense for typed answers, e.g. a spelling the game does not know.
-  const canOverrule = !right && !skipped && !onGlobe;
+  // Overruling only makes sense for typed names, e.g. a spelling the game does not know. A
+  // number is shown back as it was read, so there is nothing to overrule.
+  const canOverrule = !right && !skipped && !onGlobe && !amount;
   panel.innerHTML = `${headline}${detail ? `<p>${detail}</p>` : ""}
     ${factsCard(country)}
     <div class="row">
@@ -345,12 +398,34 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
   }
 }
 
+/** Feedback for a population or GDP answer: the real figure and how far off the guess was. */
+function amountFeedback({ country, type }: Prompt, verdict: Verdict, { skipped, guess }: AnswerDetail) {
+  const population = type === "population";
+  const figure = (population ? country.population : country.gdpPerCapita)!;
+  const format = population ? formatPopulation : formatDollars;
+  const headline =
+    verdict.result === "exact"
+      ? `<p class="verdict good">Correct</p>`
+      : verdict.result === "close"
+        ? `<p class="verdict close">Close</p>`
+        : `<p class="verdict bad">${skipped ? "Here it is" : "Not quite"}</p>`;
+  const what = population ? `The population of ${the(country.name)}` : `GDP per capita in ${the(country.name)}`;
+  let detail = `${esc(what)} is <b>${format(figure.value)}</b> (World Bank, ${esc(figure.year)}).`;
+  if (guess !== undefined) detail += ` You said ${format(guess)}, ${describeMiss(guess, figure.value)}.`;
+  return { headline, detail };
+}
+
 function factsCard(c: Country) {
+  const figures = [
+    c.population && `${formatPopulation(c.population.value)} people`,
+    c.gdpPerCapita && `${formatDollars(c.gdpPerCapita.value)} per person`,
+  ].filter(Boolean);
   return `<div class="facts">
     <img src="${flagUrl(c)}" alt="Flag of ${esc(c.name)}">
     <strong>${esc(c.name)}</strong>
     <span>Capital: ${esc(c.capitals.join(", ") || "none")}</span>
     <span class="muted">${esc(c.subregion || c.region)}</span>
+    <span class="muted">${figures.join(" · ")}</span>
   </div>`;
 }
 

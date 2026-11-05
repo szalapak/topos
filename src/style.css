@@ -279,6 +279,20 @@ form.answer input {
   color: var(--text);
 }
 
+form.answer .unit {
+  align-self: center;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.hint {
+  margin-top: 0;
+}
+
+.hint.error {
+  color: var(--bad);
+}
+
 .flag {
   display: block;
   height: 110px;
@@ -323,7 +337,7 @@ form.answer input {
   width: 72px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  grid-row: span 3;
+  grid-row: span 4;
 }
 
 .facts strong {

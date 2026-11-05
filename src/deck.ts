@@ -1,8 +1,9 @@
 import { DefaultScheduler, Rating, State, type DefaultSchedulerCard } from "ts-fsrs";
 import { normalize } from "./answers";
 import type { Country, World } from "./data";
+import { POPULATION_MIN } from "./numbers";
 
-export type QuestionType = "locate" | "identify" | "flag" | "capital" | "capitalLocate";
+export type QuestionType = "locate" | "identify" | "flag" | "capital" | "capitalLocate" | "population" | "gdpPerCapita";
 
 export const QUESTION_TYPES: { type: QuestionType; label: string; offset: number }[] = [
   { type: "locate", label: "Name → find it on the globe", offset: 0 },
@@ -10,9 +11,14 @@ export const QUESTION_TYPES: { type: QuestionType; label: string; offset: number
   { type: "flag", label: "Flag → type the country", offset: 15 },
   { type: "capital", label: "Country → type the capital", offset: 25 },
   { type: "capitalLocate", label: "Capital → find the country on the globe", offset: 40 },
+  { type: "population", label: "Country → type its population (in millions)", offset: 50 },
+  { type: "gdpPerCapita", label: "Country → type its GDP per capita (US$)", offset: 60 },
 ];
-// `offset` staggers introduction: a country's map card comes first and its flag and capital
-// well after, so they are not asked while the country is still fresh in mind.
+// `offset` staggers introduction: a country's map card comes first and its flag, capital and
+// figures well after, so they are not asked while the country is still fresh in mind.
+
+/** Question types answered with a number, graded by closeness (see `src/numbers.ts`). */
+export const AMOUNT_TYPES = ["population", "gdpPerCapita"] as const satisfies readonly QuestionType[];
 
 export type Grade = (typeof Rating)["Again" | "Hard" | "Good"];
 
@@ -97,9 +103,22 @@ const STRUGGLE_STEP = 0.25;
 const STRUGGLE_CAP = 4;
 
 const DEFAULT_SETTINGS: Settings = {
-  types: { locate: true, identify: true, flag: true, capital: true, capitalLocate: true },
+  types: {
+    locate: true,
+    identify: true,
+    flag: true,
+    capital: true,
+    capitalLocate: true,
+    population: true,
+    gdpPerCapita: true,
+  },
   newPerDay: 10,
 };
+
+/** Saved settings over the defaults, so question types added since they were saved start on. */
+function withDefaults(saved: Partial<Settings> | undefined): Settings {
+  return { ...DEFAULT_SETTINGS, ...saved, types: { ...DEFAULT_SETTINGS.types, ...saved?.types } };
+}
 
 export class Deck {
   private candidates: Prompt[];
@@ -380,7 +399,7 @@ export class Deck {
   importJson(text: string) {
     const parsed = revive(JSON.parse(text));
     if (parsed?.version !== 1 || typeof parsed.cards !== "object") throw new Error("Not a Topos progress file");
-    this.state = { ...emptyState(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
+    this.state = { ...emptyState(), ...parsed, settings: withDefaults(parsed.settings) };
     this.readHistory();
     this.save();
   }
@@ -413,6 +432,8 @@ function buildCandidates(world: World): Prompt[] {
       if (type === "capitalLocate" && country.capitals.some((c) => normalize(c).includes(normalize(country.name))))
         continue;
       if (type.startsWith("capital") && country.capitals.length === 0) continue;
+      if (type === "population" && (country.population?.value ?? 0) < POPULATION_MIN) continue;
+      if (type === "gdpPerCapita" && !country.gdpPerCapita) continue;
       list.push({ key: `${country.id}|${type}`, country, type, isNew: true, order: country.rank + offset });
     }
   }
@@ -469,7 +490,7 @@ function load(): Saved | null {
     const text = localStorage.getItem(STORAGE_KEY);
     if (!text) return null;
     const s = revive(JSON.parse(text));
-    return { ...emptyState(), ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings } };
+    return { ...emptyState(), ...s, settings: withDefaults(s.settings) };
   } catch {
     return null;
   }
