@@ -48,7 +48,17 @@ test("dollars", () => {
   for (const typed of ["45000", "45,000", "$45,000", "45k", "45K", "$45k", "45 000", "45.000", "45 thousand", "45000 dollars", "45,000 USD"])
     assert.equal(readDollars(typed), 45_000, typed);
   assert.equal(readDollars("1.5k"), 1500);
-  assert.equal(readDollars("234"), 234);
+});
+
+test("dollars: a bare number means thousands", () => {
+  assert.equal(readDollars("45"), 45_000);
+  assert.equal(readDollars("45.5"), 45_500);
+  assert.equal(readDollars("45,5"), 45_500);
+  assert.equal(readDollars("0.25"), 250);
+  assert.equal(readDollars("288"), 288_000);
+  // Too big to be thousands: plain dollars.
+  assert.equal(readDollars("1500"), 1500);
+  assert.equal(readDollars("1,500"), 1500);
 });
 
 test("things that are not numbers", () => {

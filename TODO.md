@@ -105,8 +105,8 @@ Only tested in a desktop browser at phone size so far. Check:
 - Open-ended rounds: questions picked at random, weighted by need (missed, due, nearly due,
   new), no daily allowance or "all caught up" wall, a gentle nudge when stopping very early.
 - Published to GitHub Pages on every push to `main`.
-- Population (typed in millions) and GDP per capita (US dollars, market rates) questions,
-  graded by closeness. Accepts "34", "34m", "34 million", "34,000,000", "45k" and decimal
-  commas. Countries under 2,000 people (Vatican City) are not asked their population.
+- Population (typed in millions) and GDP per capita (typed in thousands of US dollars, market
+  rates) questions, graded by closeness. Accepts "34", "34m", "34 million", "34,000,000",
+  "45", "45k", "45000" and decimal commas. Countries under 2,000 people (Vatican City) are not asked their population.
   The feedback card shows both figures for every country.
 - Unit tests with Node's built-in runner (`npm test`), run before every deploy.

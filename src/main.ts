@@ -278,15 +278,15 @@ function nextQuestion() {
         : `What is the GDP per capita of <b>${esc(the(country.name))}</b>?`;
       const hint = population
         ? "In millions: 68 for 68 million, 0.5 for half a million."
-        : "In US dollars at market exchange rates: 45000 or 45k.";
+        : "In thousands of US dollars, at market rates: 45 for $45,000, 0.8 for $800.";
       // A number keypad on phones; typed letters ("34m", "45k") still work on a keyboard.
       panel.innerHTML = `${intro}<h2>${question}</h2>
         <form class="answer" autocomplete="off">
           ${population ? "" : `<span class="unit">$</span>`}
           <input id="typed" type="text" inputmode="decimal" enterkeyhint="done" autocorrect="off"
-            spellcheck="false" placeholder="${population ? "Millions" : "US dollars"}" aria-label="Your answer"
+            spellcheck="false" placeholder="${population ? "Millions" : "Thousands"}" aria-label="Your answer"
             aria-describedby="hint">
-          ${population ? `<span class="unit">million</span>` : ""}
+          <span class="unit">${population ? "million" : "thousand"}</span>
           <button class="btn primary">Check</button>
         </form>
         <p class="muted hint" id="hint">${hint}</p>

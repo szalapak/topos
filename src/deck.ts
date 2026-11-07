@@ -12,7 +12,7 @@ export const QUESTION_TYPES: { type: QuestionType; label: string; offset: number
   { type: "capital", label: "Country → type the capital", offset: 25 },
   { type: "capitalLocate", label: "Capital → find the country on the globe", offset: 40 },
   { type: "population", label: "Country → type its population (in millions)", offset: 50 },
-  { type: "gdpPerCapita", label: "Country → type its GDP per capita (US$)", offset: 60 },
+  { type: "gdpPerCapita", label: "Country → type its GDP per capita (US$, in thousands)", offset: 60 },
 ];
 // `offset` staggers introduction: a country's map card comes first and its flag, capital and
 // figures well after, so they are not asked while the country is still fresh in mind.

@@ -106,9 +106,17 @@ export function readPopulation(input: string): number | null {
   return n.multiplied || n.value > MAX_MILLIONS ? n.value : n.value * 1e6;
 }
 
-/** A typed amount of US dollars. */
+/**
+ * GDP per capita answers are asked in thousands of dollars. No country comes near a million
+ * dollars a head, so a bare number above this is read as plain dollars: "45000" is $45,000.
+ */
+const MAX_THOUSANDS = 1000;
+
+/** A typed GDP per capita in US dollars, where a bare number means thousands. */
 export function readDollars(input: string): number | null {
-  return parseNumber(input)?.value ?? null;
+  const n = parseNumber(input);
+  if (!n) return null;
+  return n.multiplied || n.value > MAX_THOUSANDS ? n.value : n.value * 1e3;
 }
 
 export function gradeAmount(guess: number, actual: number, kind: AmountKind): "exact" | "close" | "wrong" {
