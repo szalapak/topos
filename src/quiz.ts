@@ -34,6 +34,12 @@ const PICK_FROM = 4;
 const COMFORT = 0.3;
 /** Each skill opens with a question the player probably knows, if there is one. */
 const WARM_UP_CHANCE = 0.75;
+/** How many countries `edge()` names on each side, from those known with a chance in... */
+const EDGE_COUNT = 3;
+/** ...this range (probably known)... */
+const EDGE_INSIDE = [0.7, 0.92] as const;
+/** ...and this one (probably not, but close). */
+const EDGE_OUTSIDE = [0.12, 0.45] as const;
 
 export interface QuizQuestion {
   id: string;
@@ -228,5 +234,30 @@ export class Quiz {
     const gap = top.mean - bottom.mean;
     if (this.answers.length < 10 || gap < 1 || gap < 1.5 * Math.hypot(top.sd, bottom.sd)) return null;
     return { strongest: top.name, weakest: bottom.name };
+  }
+
+  /**
+   * Countries at the edge of what the player knows in a skill, for "you probably know these,
+   * but those are just out of reach": `inside` are ones they probably know (about an 80%
+   * chance), `outside` ones they probably don't (about 30%). Only countries not asked about, up
+   * to `n` of each, from different parts of the world where possible. A side can come back
+   * short or empty, for someone who knows nearly everything or nearly nothing.
+   */
+  edge(skill: Skill, n = EDGE_COUNT): { inside: string[]; outside: string[] } {
+    const options = this.eligible
+      .get(skill)!
+      .filter((id) => !this.asked.has(id))
+      .map((id) => ({ id, chance: this.estimate.chance(id, skill), area: this.model.item(id, skill)!.a }));
+    const pick = ([low, high]: readonly number[], target: number) => {
+      const near = options
+        .filter((o) => o.chance >= low && o.chance <= high)
+        .sort((a, b) => Math.abs(a.chance - target) - Math.abs(b.chance - target));
+      // Closest to the target first, but one per part of the world until each has had a turn.
+      const chosen: typeof near = [];
+      for (const o of near) if (chosen.length < n && !chosen.some((c) => c.area === o.area)) chosen.push(o);
+      for (const o of near) if (chosen.length < n && !chosen.includes(o)) chosen.push(o);
+      return chosen.map((c) => c.id);
+    };
+    return { inside: pick(EDGE_INSIDE, 0.8), outside: pick(EDGE_OUTSIDE, 0.3) };
   }
 }

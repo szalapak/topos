@@ -48,7 +48,7 @@ const RECENT_KEPT = 8;
 const NUDGE_BELOW = 8;
 /** Ways to colour the globe between rounds, besides "All". */
 const GLOBE_MODES: { id: string; label: string; types: readonly QuestionType[] }[] = [
-  { id: "map", label: "Maps", types: skillInfo("map").types },
+  { id: "map", label: "Countries", types: skillInfo("map").types },
   { id: "flag", label: "Flags", types: skillInfo("flag").types },
   { id: "capital", label: "Capitals", types: skillInfo("capital").types },
   { id: "numbers", label: "Numbers", types: AMOUNT_TYPES },
@@ -586,8 +586,16 @@ function showQuizResults() {
   const results = quiz.results();
   const [main, ...others] = results;
   const areas = quiz.areas();
-  const unsure = results.some((r) => r.high - r.low > NARROW_ABOVE);
+  const edge = edgeOf(quiz, main.skill);
+  // The countries just out of reach become the first new cards, so the line below can say so.
+  const firstType = skillInfo(main.skill).types[0];
+  const learnFirst = deck
+    .putFirst(edge.outside.flatMap((id) => deck.prompt(id, firstType)?.key ?? []))
+    .map((key) => key.split("|")[0]);
+  const offerMore = !!edge.text || results.some((r) => r.high - r.low > NARROW_ABOVE);
   const { remembered, missed } = run;
+  const missedOnes = missed === 1 ? "the one you missed" : `the ${missed} you missed`;
+  const firstNames = listed(learnFirst.map((id) => esc(the(world.byId.get(id)!.name))));
   const notes = [
     remembered &&
       `${remembered === 1 ? "The one you got right is" : `The ${remembered} you got right are`} now in long-term
@@ -595,7 +603,10 @@ function showQuizResults() {
     outcome.inferred &&
       `We've also marked ${outcome.inferred} ${outcome.inferred === 1 ? "card" : "cards"} you very likely know. We'll
        still quiz you on the ones we're less sure of over the next few weeks, just to double-check.`,
-    missed && `${missed === 1 ? "The one you missed comes" : `The ${missed} you missed come`} back first when you start learning.`,
+    learnFirst.length
+      ? `When you start learning, ${missed ? `you'll get another go at ${missedOnes}, then move on` : "you'll go straight"} to new
+         ones, starting with ${firstNames}.`
+      : missed && `When you start learning, you'll get another go at ${missedOnes} first.`,
   ].filter(Boolean);
 
   panel.innerHTML = `<div class="result">
@@ -615,9 +626,10 @@ function showQuizResults() {
       }
     </div>
     ${areas ? `<p>You know ${esc(areas.strongest)} best, and ${esc(areas.weakest)} least.</p>` : ""}
+    ${edge.text ? `<p>${edge.text} Sound about right? If not, a few more questions will help us get it right.</p>` : ""}
     <div class="row">
+      ${offerMore ? `<button class="btn" id="narrow">Narrow it down: ${NARROW_MORE} more</button>` : ""}
       <button class="btn" id="share">Share your result</button>
-      ${unsure ? `<button class="btn" id="narrow">Narrow it down: ${NARROW_MORE} more</button>` : ""}
     </div>
     <p class="muted" id="share-note" hidden></p>
     ${notes.map((n) => `<p>${n}</p>`).join("")}
@@ -628,8 +640,15 @@ function showQuizResults() {
     </div>`;
 
   showQuizMap($("#legend"), quiz, null);
+  // A country named in the edge line, tapped: show it on the globe.
+  panel.querySelectorAll<HTMLButtonElement>("[data-fly]").forEach((b) => {
+    b.onclick = () => {
+      globe.setHighlights([[b.dataset.fly!, "target"]]);
+      globe.flyTo(b.dataset.fly!);
+    };
+  });
   $<HTMLButtonElement>("#share").onclick = (e) => shareResult(e.currentTarget as HTMLButtonElement, results);
-  if (unsure) {
+  if (offerMore) {
     $("#narrow").onclick = () => {
       quiz.extend(NARROW_MORE);
       session = { answered: 0, correct: 0, recent: [], quiz: run };
@@ -638,6 +657,31 @@ function showQuizResults() {
   }
   $("#go").onclick = () => startRound();
   $("#home").onclick = showHome;
+}
+
+/**
+ * The countries at the edge of what the player knows in a skill (see `Quiz.edge()`), and a line
+ * about them: "You probably know A, B and C, but X, Y and Z are likely just out of reach", each
+ * name a button that shows it on the globe. `outside` is left empty when the line doesn't name
+ * them, and `text` when there is nothing to say (or for population and GDP, where it would read
+ * oddly).
+ */
+function edgeOf(quiz: Quiz, skill: Skill): { text: string; outside: string[] } {
+  if (skill === "population" || skill === "gdp") return { text: "", outside: [] };
+  const { inside, outside } = quiz.edge(skill);
+  const names = (ids: string[]) =>
+    listed(ids.map((id) => `<button class="link inline" data-fly="${id}">${esc(the(world.byId.get(id)!.name))}</button>`));
+  // "the flags of ..." and "those of ..." for flags and capitals; just the countries for maps.
+  const of = skill === "map" ? "" : `the ${skillInfo(skill).noun} of `;
+  const those = skill === "map" ? "" : "those of ";
+  const known = inside.length >= 2;
+  const unknown = outside.length >= 2;
+  if (known && unknown) {
+    return { text: `You probably know ${of}${names(inside)}, but ${those}${names(outside)} are likely just out of reach.`, outside };
+  }
+  if (known) return { text: `You probably even know ${of}${names(inside)}.`, outside: [] };
+  if (unknown) return { text: `Likely just out of reach: ${of}${names(outside)}.`, outside };
+  return { text: "", outside: [] };
 }
 
 /** Colours the globe by what the quiz thinks the player knows, for one skill or all of them. */

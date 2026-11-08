@@ -162,6 +162,31 @@ test("narrowing it down asks more questions and narrows the range", () => {
   assert.ok(width(quiz) < before, `${width(quiz)} vs ${before}`);
 });
 
+test("the edge: countries probably known, and ones just out of reach", () => {
+  const knows = (id: string) => rankOf(id) < 90;
+  const quiz = play(new Quiz(model, ["map"], "medium", available, mulberry32(10)), knows);
+  const { inside, outside } = quiz.edge("map");
+  assert.equal(inside.length, 3);
+  assert.equal(outside.length, 3);
+  const asked = new Set(quiz.answers.map((a) => a.id));
+  for (const id of [...inside, ...outside]) assert.ok(!asked.has(id), `${id} was asked`);
+  for (const id of inside) assert.ok(quiz.chance(id, "map") >= 0.7, id);
+  for (const id of outside) assert.ok(quiz.chance(id, "map") <= 0.45, id);
+  // Near the real edge (rank 90) rather than far from it.
+  assert.ok(mean(inside.map(rankOf)) > 40 && mean(inside.map(rankOf)) < 110, `inside ${inside.map(rankOf)}`);
+  assert.ok(mean(outside.map(rankOf)) > 70 && mean(outside.map(rankOf)) < 170, `outside ${outside.map(rankOf)}`);
+  // From different parts of the world.
+  const area = (id: string) => model.item(id, "map")!.a;
+  assert.equal(new Set(inside.map(area)).size, 3);
+  assert.equal(new Set(outside.map(area)).size, 3);
+});
+
+test("the edge for someone who knows everything has nothing out of reach nearby", () => {
+  const quiz = play(new Quiz(model, ["flag"], "detailed", available, mulberry32(11)), () => true);
+  const { outside } = quiz.edge("flag");
+  assert.ok(outside.length < 2, `outside ${outside}`);
+});
+
 test("number questions only ask countries the game asks about", () => {
   const quiz = play(new Quiz(model, ["population", "gdp"], "short", available, mulberry32(6)), () => true);
   for (const a of quiz.answers) assert.ok(available(a.id, a.type), `${a.id} ${a.type}`);

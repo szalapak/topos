@@ -64,6 +64,9 @@ that assumes real knowledge roughly follows fame plus a regional bonus.
   go by distance from the home country (a Pole knows Lithuania better than Andorra), which
   needs the home country rather than just the area.
 - A share image (the coloured globe with the count) would travel better than text.
+- A proper preview picture for shared links. The link preview tags in `index.html` use the
+  app icon for now (`og:image`, 512x512); chat apps and social sites show a wide picture best,
+  about 1200x630.
 
 ### 4. Test properly on a real phone
 Only tested in a desktop browser at phone size so far. Check:

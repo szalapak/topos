@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: "Topos",
         short_name: "Topos",
-        description: "Learn the countries of the world with spaced repetition.",
+        description: "How many countries do you know? Take a quick quiz, then learn the rest with spaced repetition.",
         theme_color: "#1d4e6b",
         background_color: "#0f2433",
         display: "standalone",

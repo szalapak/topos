@@ -266,6 +266,11 @@ button {
   font-weight: 600;
 }
 
+/* A link-like button inside a sentence, e.g. a country name that shows it on the globe. */
+.link.inline {
+  padding: 0;
+}
+
 form.answer {
   display: flex;
   gap: 8px;

@@ -70,7 +70,7 @@ How to read it:
 
 **Globe key on the home screen**
 
-- Buttons to colour the globe by: `All` · `Maps` · `Flags` · `Capitals` · `Numbers`
+- Buttons to colour the globe by: `All` · `Countries` · `Flags` · `Capitals` · `Numbers`
 - Key: `Known {n}` · `Learning {n}` · `Needs work {n}`
 
 ---
@@ -265,8 +265,17 @@ Population, GDP per capita; the others go underneath.
   - Areas: `Europe` · `the Middle East and North Africa` · `Sub-Saharan Africa` ·
     `South and Central Asia` · `East and Southeast Asia` · `North and Central America` ·
     `South America` · `Oceania`
-- Buttons: `Share your result` · `Narrow it down: 10 more` (the second only while a range is
-  still wide)
+- The edge of what you know, for the big number's category (not for population or GDP).
+  Names are tappable and show the country on the globe. Three on each side where possible,
+  from different parts of the world:
+  - Countries: `You probably know {A}, {B} and {C}, but {X}, {Y} and {Z} are likely just out of reach. Sound about right? If not, a few more questions will help us get it right.`
+  - Flags and capitals: `You probably know the flags of {A}, {B} and {C}, but those of {X}, {Y} and {Z} are likely just out of reach. Sound about right? If not, a few more questions will help us get it right.`
+  - When nothing is just out of reach (you know nearly everything):
+    `You probably even know {A}, {B} and {C}. Sound about right? ...`
+  - When nothing is probably known yet:
+    `Likely just out of reach: {X}, {Y} and {Z}. Sound about right? ...`
+- Buttons: `Narrow it down: 10 more` · `Share your result` (the first whenever the edge line is
+  shown, or while a range is still wide)
 
 **What happens next** (each line only when it applies)
 
@@ -275,9 +284,13 @@ Population, GDP per capita; the others go underneath.
   - more: `The {n} you got right are now in long-term memory, so they'll only come back in a month or two.`
 - Cards filled in:
   - `We've also marked {n} card(s) you very likely know. We'll still quiz you on the ones we're less sure of over the next few weeks, just to double-check.`
-- Misses:
-  - one: `The one you missed comes back first when you start learning.`
-  - more: `The {n} you missed come back first when you start learning.`
+- Learning next. The countries just out of reach (from the edge line) become the first new
+  cards:
+  - with misses: `When you start learning, you'll get another go at the {n} you missed, then move on to new ones, starting with {X}, {Y} and {Z}.`
+    (one miss: `the one you missed`)
+  - without: `When you start learning, you'll go straight to new ones, starting with {X}, {Y} and {Z}.`
+  - with misses but no edge line: `When you start learning, you'll get another go at the {n} you missed first.`
+    (one miss: `the one you missed`)
 
 **Globe key on the results**
 
@@ -384,21 +397,11 @@ Only reached with every question type switched off:
 ## Outside the page
 
 - Browser tab title: `Topos`
-- Search engine description: `Learn the countries of the world with spaced repetition.`
+- Search engine description and app description when installed:
+  `How many countries do you know? Take a quick quiz, then learn the rest with spaced repetition.`
 - Name when added to a phone's home screen: `Topos`
-- App description when installed: `Learn the countries of the world with spaced repetition.`
-
----
-
-## Things I noticed while collecting this
-
-Not changed, just flagged in case you want to decide on them:
-
-- **Two names for the same thing:** the home screen's globe buttons say `Maps`, the quiz says
-  `Countries`.
-- **Two different keys:** home says `Known / Learning / Needs work`, quiz results say
-  `Likely known / Not sure / Not yet`. They do measure different things (your cards versus
-  the quiz's estimate), but players may not see why.
-- **"GDP figures"** reads a little oddly in the share text: `... and 8 GDP figures`.
-- **The descriptions outside the page** (search, installed app) don't mention the quiz, which
-  is now the most shareable part.
+- Preview card when the link is shared in a chat or on social media:
+  - Title: `How many countries do you know?`
+  - Text: `Take a quick quiz, then learn the rest with spaced repetition.`
+  - Site name: `Topos`
+  - Picture: the app icon, for now

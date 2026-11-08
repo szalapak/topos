@@ -56,6 +56,11 @@ interface Saved {
   inferred: Record<string, true>;
   /** The last quiz, kept so its estimate can be refined by later answers. */
   quiz?: SavedQuiz;
+  /**
+   * Cards to start before any other new ones (the countries the quiz found just beyond what the
+   * player knows). Each drops out of the way once started.
+   */
+  firstNew?: string[];
 }
 
 interface SavedQuiz {
@@ -265,16 +270,22 @@ export class Deck {
       options.push({ weight: Math.min(aheadTotal, AHEAD_MAX_WEIGHT), take });
     }
 
-    const enabled = this.state.settings.types;
     const window = this.candidates
-      .filter((c) => enabled[c.type] && !this.state.cards[c.key])
+      .filter((c) => this.isUnstarted(c))
       .slice(0, NEW_CARD_WINDOW)
       .map((c) => ({ ...c, id: c.country.id }));
     const pool = window.filter((c) => !recent.includes(c.id));
     const newOnes = pool.length ? pool : window.filter((c) => c.id !== recent[0]);
-    if (newOnes.length) {
-      // Random, but leaning towards the front of the line.
-      const take = () => toPrompt(newOnes[Math.floor(newOnes.length * Math.random() ** 1.5)], true);
+    // Cards put first (see `putFirst()`) jump the line, as long as they weren't just asked about.
+    const first = this.firstNew()
+      .filter((c) => !recent.includes(c.country.id))
+      .map((c) => ({ ...c, id: c.country.id }));
+    if (newOnes.length || first.length) {
+      // One put first if there is one; otherwise random, but leaning towards the front of the line.
+      const take = () =>
+        first.length
+          ? toPrompt(first[Math.floor(first.length * Math.random())], true)
+          : toPrompt(newOnes[Math.floor(newOnes.length * Math.random() ** 1.5)], true);
       const reviews = options.reduce((sum, o) => sum + (o.missed ? 0 : o.weight), 0);
       options.push({ weight: this.newWeight(learning, reviews), take });
     }
@@ -535,6 +546,31 @@ export class Deck {
     }
     for (const key of Object.keys(this.state.inferred)) if (!this.isInferred(key)) delete this.state.inferred[key];
     return count;
+  }
+
+  /**
+   * Makes these the next new cards, ahead of the usual order. Returns the ones that will be:
+   * those not started yet, for question types that are switched on.
+   */
+  putFirst(keys: readonly string[]): string[] {
+    this.state.firstNew = keys.filter((key) => {
+      const c = this.byKey.get(key);
+      return c && this.isUnstarted(c);
+    });
+    this.save();
+    return this.state.firstNew;
+  }
+
+  /** The cards put first that are still waiting. */
+  private firstNew(): Prompt[] {
+    return (this.state.firstNew ?? []).flatMap((key) => {
+      const c = this.byKey.get(key);
+      return c && this.isUnstarted(c) ? [c] : [];
+    });
+  }
+
+  private isUnstarted(c: Prompt) {
+    return this.state.settings.types[c.type] && !this.state.cards[c.key];
   }
 
   /** Filled in by the quiz and not asked since. */
