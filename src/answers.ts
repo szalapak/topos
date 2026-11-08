@@ -2,8 +2,11 @@ export type Verdict =
   | { result: "exact" }
   /** Right answer with a small spelling slip. */
   | { result: "close" }
-  /** `matched` is set when the answer is correct for some other entry, e.g. a neighbouring country. */
-  | { result: "wrong"; matched?: string };
+  /**
+   * `matched` is set when the answer is correct for some other entry, e.g. a neighbouring
+   * country, and `matchedKey` is that entry's key.
+   */
+  | { result: "wrong"; matched?: string; matchedKey?: string };
 
 export function normalize(s: string): string {
   return s
@@ -25,13 +28,14 @@ export function normalize(s: string): string {
  */
 export class AnswerSet {
   private entries = new Map<string, string[]>();
-  private owners = new Map<string, string[]>();
+  /** Whose answer each accepted form is. */
+  private owners = new Map<string, { key: string; label: string }[]>();
 
   constructor(answers: Iterable<[key: string, label: string, accepted: string[]]>) {
     for (const [key, label, accepted] of answers) {
       const forms = [...new Set(accepted.map(normalize).filter(Boolean))];
       this.entries.set(key, forms);
-      for (const f of forms) this.owners.set(f, [...(this.owners.get(f) ?? []), label]);
+      for (const f of forms) this.owners.set(f, [...(this.owners.get(f) ?? []), { key, label }]);
     }
   }
 
@@ -42,7 +46,7 @@ export class AnswerSet {
     if (target.includes(typed)) return { result: "exact" };
 
     const owners = this.owners.get(typed);
-    if (owners) return { result: "wrong", matched: owners[0] };
+    if (owners) return { result: "wrong", matched: owners[0].label, matchedKey: owners[0].key };
 
     const toTarget = Math.min(...target.map((t) => editDistance(typed, t)));
     if (toTarget > allowedTypos(typed.length)) return { result: "wrong" };

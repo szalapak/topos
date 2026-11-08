@@ -17,8 +17,8 @@ same feedback:
 - The Numbers mode colours by how well population and GDP per capita are known. It could
   also show the figures themselves, e.g. shading countries by population.
 - Tune the thresholds once there is real progress to look at: "known" is currently an FSRS
-  stability of 14 days or more, and cards from the placement round count as known until
-  first asked.
+  stability of 14 days or more, and cards filled in by the quiz count as known until first
+  asked.
 
 ### 2. Languages questions, and tuning the number questions
 Population and GDP per capita questions are in (see Done). Still to do:
@@ -34,20 +34,36 @@ Population and GDP per capita questions are in (see Done). Still to do:
   (e.g. English in many African countries). May need a better source or a curated "main
   languages" list.
 - New question types go in `QUESTION_TYPES` in `src/deck.ts`, with a large `offset` so they
-  arrive after the map, flag and capital cards. The placement round (`src/placement.ts`)
-  would need a skill for them too, or they can start from scratch (as the number ones do).
+  arrive after the map, flag and capital cards. To be in the quiz they also need a skill in
+  `SKILLS` in `src/knowledge.ts` (with a prior: typical count, spread, width).
 
-### 3. Placement can flood the review queue for strong players
-A player who knows nearly everything gets about 160 countries x 5 question types, so roughly
-750 cards marked known, spread over 2 to 28 days: around 25 to 30 checks a day for a month.
-Options: spread over a longer period when there are many, cap checks per day, or only mark
-one or two card types per country as known and let the rest be checked lazily.
-See `markKnown` in `src/deck.ts` and `KNOWN_FIRST_CHECK_DAYS`.
+### 3. The quiz: things to learn from real use
+The quiz (`src/quiz.ts`, model in `src/knowledge.ts`) replaced the placement round in Nov 2026.
+Its priors, the "how well known" order as difficulty, and `RANK_SHIFT` (capital traps, look-alike
+flags) are educated guesses. In simulation the 80% range holds the true count 70 to 90% of the
+time, with typical errors of about 15 (short), 10 (medium) and 7 (detailed) countries, but
+that assumes real knowledge roughly follows fame plus a regional bonus.
 
-With open-ended rounds this no longer blocks anything, but a big due pile crowds out new
-cards (they get a share only until the day's pace, then shrink). In simulation, a player whose
-placement overestimated them had 200 or so cards due after four weeks and was getting about
-two new cards a day.
+- **Results histogram** ("how many countries do people know?") and **calibrated difficulty**
+  both need answers from many players, so a small server endpoint (anonymous: skill, country,
+  right or wrong, and the final counts). With that, each country's difficulty per skill could
+  be fitted instead of read off the fame order, and the priors set from real players.
+- **Watch the review load after a quiz.** Filled-in cards are now spread by confidence
+  (about 5 days at an 80% chance, 3 weeks at 95%, 2.5 months at 99%; `firstCheckDays` in
+  `src/deck.ts`), and first checks feed back into the estimate: filled-in cards that drop below
+  60% are taken back, and less certain ones are checked sooner (`refreshEstimate`). This should
+  stop the old placement round's pile-up (around 750 cards spread over 2 to 28 days for a
+  strong player), but it has not been simulated over weeks.
+- The feedback only takes cards back; it never fills in more when a player turns out to know
+  more than estimated. Could do, with care not to flip cards back and forth.
+- **Home area and mix-ups**, also guesses to tune: the home area starts with a bonus of 0.8
+  logits (`HOME_AREA_BONUS`), and a wrong answer naming another country counts as half a miss
+  for it (`MIX_UP_WEIGHT`), in `src/knowledge.ts`. In simulation the home hint cut per-country
+  error in the home area by 7 to 11% when right, and cost under 3% overall when wrong. Mix-ups
+  are only used in the quiz, not in ordinary rounds. A finer version of the home hint would
+  go by distance from the home country (a Pole knows Lithuania better than Andorra), which
+  needs the home country rather than just the area.
+- A share image (the coloured globe with the count) would travel better than text.
 
 ### 4. Test properly on a real phone
 Only tested in a desktop browser at phone size so far. Check:
@@ -78,11 +94,12 @@ Only tested in a desktop browser at phone size so far. Check:
   `src/deck.ts` (`MISSED_WEIGHT`, `NEW_SHARE` and so on), tuned against a simulated player
   (Nov 2026). Worth checking against real logs after a few weeks: how soon missed cards
   return, how many new cards arrive per day, whether due piles keep growing.
-- **More automated tests**: `npm test` covers `src/answers.ts` and `src/numbers.ts`. Still
-  untested: the card picking in `src/deck.ts` (a missed card must not repeat straight away; a
-  simulated player over a few weeks, as used for tuning, with fake time), and the placement
-  estimates (simulated players should land at roughly 80 to 85% of what they know). Both
-  need `localStorage` and the world data faked in Node.
+- **More automated tests**: `npm test` covers `src/answers.ts`, `src/numbers.ts`, and the quiz
+  and its model (`tests/quiz.test.ts`, with simulated players). Still untested: the card
+  picking in `src/deck.ts` (a missed card must not repeat straight away; a simulated player
+  over a few weeks, as used for tuning, with fake time) and how the deck takes in a quiz
+  (`applyQuiz`, `refreshEstimate`). Both need `localStorage` faked in Node, and `src/deck.ts`
+  imports without `.ts` extensions, which Node needs.
 - **Accessibility**: globe questions need a pointer. A keyboard alternative would help.
 
 ## Data upkeep
@@ -97,7 +114,10 @@ Only tested in a desktop browser at phone size so far. Check:
 - Five question types: find on globe, name the highlighted country, flag, capital, capital
   to globe.
 - FSRS spaced repetition, progress in the browser, export and import.
-- Placement round for new players.
+- Placement round for new players, replaced by the adaptive quiz (Nov 2026): choose skills
+  and length, questions picked to narrow the estimate, "you know about X (probably between A
+  and B)" with a share button and a `?quiz` link, "narrow it down" for 10 more, right answers
+  straight to long-term memory, likely-known cards filled in and checked by confidence.
 - New cards drawn at random from a window, ordered by how well known a country is.
 - A missed card no longer repeats straight away (fixed after first real use).
 - The placement round never asks about the same country twice, even across skills.

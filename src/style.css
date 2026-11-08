@@ -252,6 +252,11 @@ button {
   width: 100%;
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .link {
   border: 0;
   background: none;
@@ -456,8 +461,67 @@ label.check {
 }
 
 label.check input {
+  flex: none;
   width: 20px;
   height: 20px;
+}
+
+/* The quiz result: big enough to read in a screenshot. */
+.result {
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  text-align: center;
+}
+
+.panel .result p {
+  margin: 0;
+}
+
+.result-lead {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.result-number {
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel .result .result-of {
+  margin-bottom: 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.result-others {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.result-others div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.result-others b {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-others .muted {
+  font-size: 12px;
 }
 
 input[type="number"] {

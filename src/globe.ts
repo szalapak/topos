@@ -46,6 +46,8 @@ export class Globe {
   private colors: Record<string, string> = {};
   private frame: number | null = null;
   private animation: number | null = null;
+  /** Where the current or last animation ends. */
+  private heading: { rotation: [number, number]; zoom: number } = { rotation: [0, 0], zoom: 1 };
   private spinning = false;
   /** While the globe moves it is drawn with coarser outlines, then redrawn sharp once it settles. */
   private moving = false;
@@ -100,7 +102,9 @@ export class Globe {
 
   /** Zooms out if closer than `max`, so a "find it" question does not start zoomed on a neighbour. */
   zoomOutTo(max: number) {
-    if (this.zoom > max) this.animateTo(this.rotation, max, 500);
+    // Where a move still under way is heading counts, not only where the globe is now.
+    const { rotation, zoom } = this.animation != null ? this.heading : { rotation: this.rotation, zoom: this.zoom };
+    if (zoom > max) this.animateTo(rotation, max, 500);
   }
 
   zoomBy(factor: number) {
@@ -311,6 +315,7 @@ export class Globe {
   private animateTo(rotation: [number, number], zoom: number, duration: number) {
     this.cancelAnimation();
     this.spinning = false;
+    this.heading = { rotation, zoom };
     const from = [...this.rotation] as [number, number];
     const fromZoom = this.zoom;
     // Take the short way round in longitude.

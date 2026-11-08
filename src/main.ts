@@ -3,8 +3,9 @@ import { AnswerSet, type Verdict } from "./answers";
 import { loadWorld, type Country, type World } from "./data";
 import { AMOUNT_TYPES, Deck, QUESTION_TYPES, Rating, type Grade, type Knowledge, type Prompt, type QuestionType } from "./deck";
 import { Globe } from "./globe";
+import { SKILLS, skillInfo, type Skill } from "./knowledge";
 import { describeMiss, formatDollars, formatPopulation, gradeAmount, readDollars, readPopulation } from "./numbers";
-import { Placement, SKILLS } from "./placement";
+import { Quiz, QUIZ_LENGTHS, quizSize, type QuizLength, type SkillResult } from "./quiz";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const panel = $("#panel");
@@ -22,11 +23,23 @@ interface Session {
   correct: number;
   /** Countries asked about most recently, kept out of the next few questions. */
   recent: string[];
-  /** Set during the placement round, where answers go to the level estimate instead of the deck. */
-  placement?: Placement;
+  /** Set during the quiz, whose answers go to the deck only when its results are shown. */
+  quiz?: QuizRun;
   /** True once the player has been asked to do a few more before stopping. */
   nudged?: boolean;
 }
+
+interface QuizRun {
+  quiz: Quiz;
+  /** Every answer with its grade for the deck, and any other country it named... */
+  graded: { prompt: Prompt; grade: Grade; mixedUpWith?: string }[];
+  /** ...of which this many have gone into the deck. */
+  applied: number;
+  /** What the deck made of them so far, over every "narrow it down". */
+  remembered: number;
+  missed: number;
+}
+
 let session: Session | null = null;
 let lastSession: Session | null = null;
 /** How many recent countries `Deck.next()` is told about. */
@@ -35,9 +48,20 @@ const RECENT_KEPT = 8;
 const NUDGE_BELOW = 8;
 /** Ways to colour the globe between rounds, besides "All". */
 const GLOBE_MODES: { id: string; label: string; types: readonly QuestionType[] }[] = [
-  ...SKILLS.map((s) => ({ id: s.skill, label: s.label, types: s.types })),
+  { id: "map", label: "Maps", types: skillInfo("map").types },
+  { id: "flag", label: "Flags", types: skillInfo("flag").types },
+  { id: "capital", label: "Capitals", types: skillInfo("capital").types },
   { id: "numbers", label: "Numbers", types: AMOUNT_TYPES },
 ];
+/** What the quiz asks about and how long it is, kept for the rest of the visit. */
+const quizChoice: { skills: Skill[]; length: QuizLength } = {
+  skills: SKILLS.filter((s) => s.byDefault).map((s) => s.skill),
+  length: "medium",
+};
+/** "Narrow it down" asks this many more questions. */
+const NARROW_MORE = 10;
+/** ...and is offered while a count's likely range is wider than this. */
+const NARROW_ABOVE = 12;
 /** Which mode the globe is coloured by between rounds; null for all question types together. */
 let globeMode: string | null = null;
 
@@ -50,9 +74,16 @@ async function init() {
   $("#loading").remove();
   $("#zoom-in").onclick = () => globe.zoomBy(1.6);
   $("#zoom-out").onclick = () => globe.zoomBy(1 / 1.6);
-  doneButton.onclick = () => (session?.placement ? showPlacementResults() : stopRound());
+  doneButton.onclick = () => (session?.quiz ? showQuizResults() : stopRound());
   trackVisibleArea();
-  showHome();
+  // Shared results link here with ?quiz, straight to the quiz.
+  const params = new URLSearchParams(location.search);
+  if (params.has("quiz")) {
+    params.delete("quiz");
+    const rest = params.toString();
+    history.replaceState(null, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
+    showQuizSetup();
+  } else showHome();
 }
 
 /**
@@ -97,13 +128,13 @@ function showHome() {
   updateCounts();
 
   if (deck.isFresh) return showWelcome();
+  // Answers since the last quiz may change what it filled in.
+  deck.refreshEstimate();
 
   const c = deck.counts();
   const p = deck.progress();
   panel.innerHTML = `
-    <h1>Learn the world, a few countries at a time</h1>
-    <p class="muted">Play for as long as you like and stop whenever you want. Anything you
-      find hard comes back sooner.</p>
+    <h1>Where were we?</h1>
     ${lastSession && lastSession.answered ? `<p>Last round: <b>${lastSession.correct}</b> of <b>${lastSession.answered}</b> right.</p>` : ""}
     <div class="stats">
       <div class="stat"><b>${c.due}</b><span>due now</span></div>
@@ -113,27 +144,31 @@ function showHome() {
     <button class="btn primary wide" id="start">Start</button>
     <p class="muted" style="margin-top:12px">${p.reviewing} cards in long-term memory · ${p.answers} answers so far</p>
     <div id="legend"></div>
-    <div class="row"><button class="link" id="settings">Settings and your data</button></div>
+    <div class="row">
+      <button class="link" id="quiz">How many countries do you know? Take the quiz</button>
+      <button class="link" id="settings">Settings and your data</button>
+    </div>
   `;
   showKnowledge($("#legend"));
   $("#start").onclick = () => startRound();
+  $("#quiz").onclick = showQuizSetup;
   $("#settings").onclick = showSettings;
 }
 
 function showWelcome() {
   panel.innerHTML = `
-    <h1>Learn the world, a few countries at a time</h1>
-    <p class="muted">Play for as long as you like and stop whenever you want. Anything you
-      find hard comes back sooner.</p>
-    <p>New here? A quick placement round (${new Placement(world, deck).total} questions, a few minutes)
-      finds out what you already know, so you don't start with the basics.</p>
+    <h1>Geography, in small doses</h1>
+    <p class="muted">Learn the countries with spaced repetition. Anything you don't know, you'll
+      keep seeing until you do.</p>
+    <p>How many countries do you know? Find out with a quick quiz, and you'll start learning from
+      there.</p>
     <div class="row">
-      <button class="btn primary" id="placement">Take the placement round</button>
+      <button class="btn primary" id="quiz">Take the quiz</button>
       <button class="btn" id="scratch">Start from scratch</button>
     </div>
     <div class="row" style="margin-top:12px"><button class="link" id="settings">Settings and your data</button></div>
   `;
-  $("#placement").onclick = startPlacement;
+  $("#quiz").onclick = showQuizSetup;
   $("#scratch").onclick = () => startRound();
   $("#settings").onclick = showSettings;
 }
@@ -177,15 +212,10 @@ function startRound() {
   nextQuestion();
 }
 
-function startPlacement() {
-  session = { answered: 0, correct: 0, recent: [], placement: new Placement(world, deck) };
-  nextQuestion();
-}
-
 function updateCounts() {
   const c = deck.counts();
-  const p = session?.placement;
-  if (p) counts.textContent = `Placement ${p.done} of ${p.total}`;
+  const q = session?.quiz?.quiz;
+  if (q) counts.textContent = `Quiz ${q.done} of ${q.total}`;
   else if (session) counts.textContent = `${session.correct}/${session.answered} right · ${c.due} due`;
   else counts.textContent = deck.isFresh ? "" : `${c.due} due · ${c.learning} learning`;
 }
@@ -194,18 +224,22 @@ function updateCounts() {
 
 function nextQuestion() {
   const s = session!;
-  const prompt = s.placement ? s.placement.next() : deck.next(s.recent);
+  let prompt: Prompt | null | undefined;
+  if (s.quiz) {
+    const q = s.quiz.quiz.next();
+    prompt = q && deck.prompt(q.id, q.type);
+  } else prompt = deck.next(s.recent);
   doneButton.hidden = false;
   globe.spin(false);
   globe.setHighlights([]);
   // The colours would give answers away during a round.
   globe.setKnowledge(new Map());
   updateCounts();
-  if (!prompt) return s.placement ? showPlacementResults() : showNothingToAsk();
+  if (!prompt) return s.quiz ? showQuizResults() : showNothingToAsk();
 
   const { country, type } = prompt;
-  const intro = s.placement
-    ? `<p class="muted">Placement question ${s.placement.done + 1} of ${s.placement.total}</p>`
+  const intro = s.quiz
+    ? `<p class="muted">Question ${s.quiz.quiz.done + 1} of ${s.quiz.quiz.total}</p>`
     : prompt.isNew
       ? `<p class="muted">New card</p>`
       : "";
@@ -327,12 +361,19 @@ interface AnswerDetail {
 function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
   const s = session!;
   const right = verdict.result !== "wrong";
+  const grade: Grade = verdict.result === "exact" ? Rating.Good : verdict.result === "close" ? Rating.Hard : Rating.Again;
   let overrule: () => void;
-  if (s.placement) {
-    s.placement.record(prompt, right);
-    overrule = () => s.placement!.overruleLast();
+  if (s.quiz) {
+    const run = s.quiz;
+    // The country tapped instead, or whose name or capital was typed.
+    const mixedUpWith = verdict.result === "wrong" ? (detail.tappedId ?? verdict.matchedKey) : undefined;
+    run.quiz.record(prompt.country.id, prompt.type, right, mixedUpWith);
+    run.graded.push({ prompt, grade, mixedUpWith });
+    overrule = () => {
+      run.quiz.overruleLast();
+      run.graded[run.graded.length - 1] = { prompt, grade: Rating.Good };
+    };
   } else {
-    const grade: Grade = verdict.result === "exact" ? Rating.Good : verdict.result === "close" ? Rating.Hard : Rating.Again;
     const undo = deck.answer(prompt, grade);
     overrule = () => {
       undo();
@@ -366,14 +407,38 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
   if (amount) ({ headline, detail } = amountFeedback(prompt, verdict, answer));
   else if (verdict.result === "exact") headline = `<p class="verdict good">Correct</p>`;
   else if (verdict.result === "close") {
-    headline = `<p class="verdict close">Nearly: it's spelt ${esc(expected)}</p>`;
+    const spelt = `${esc(expected)}${stop(expected)}`;
+    headline = `<p class="verdict close">${oneOf("misspelt", [
+      `Correct, more or less. It's spelt ${spelt}`,
+      `Close enough. Officially, it's spelt ${spelt}`,
+      `We'll allow it. It's spelt ${spelt}`,
+    ])}</p>`;
   } else {
-    headline = `<p class="verdict bad">${skipped ? "Here it is" : "Not quite"}</p>`;
-    if (onGlobe && verdict.matched) detail = `You tapped ${esc(the(verdict.matched))}. ${esc(sentence(the(country.name)))} is in orange.`;
-    else if (onGlobe) detail = `${esc(sentence(the(country.name)))} is in orange.`;
-    else if (verdict.matched && type === "capital") detail = `${esc(typed ?? "")} is the capital of ${esc(the(verdict.matched))}. The answer is <b>${esc(expected)}</b>.`;
-    else if (verdict.matched) detail = `That's a different country. The answer is <b>${esc(expected)}</b>.`;
-    else detail = `The answer is <b>${esc(expected)}</b>.`;
+    headline = wrongHeadline(skipped);
+    const target = esc(sentence(the(country.name)));
+    const answer = `<b>${esc(expected)}</b>${stop(expected)}`;
+    const matched = verdict.matched;
+    if (onGlobe && matched) {
+      detail = oneOf("tapped", [
+        `That's ${esc(the(matched))}. ${target} is in orange.`,
+        `That's ${esc(the(matched))}: right planet, wrong country. ${target} is in orange.`,
+        `${esc(sentence(the(matched)))}, as it happens. ${target} is the one in orange.`,
+      ]);
+    } else if (onGlobe) detail = `${target} is in orange.`;
+    else if (matched && type === "capital") {
+      const said = esc(typed ?? "");
+      detail = oneOf("otherCapital", [
+        `${said} is the capital of ${esc(the(matched))}. The answer is ${answer}`,
+        `Good capital, wrong country. ${said} belongs to ${esc(the(matched))}; the answer is ${answer}`,
+        `${esc(sentence(the(matched)))} would agree with you. The answer is ${answer}`,
+      ]);
+    } else if (matched) {
+      detail = oneOf("otherCountry", [
+        `That's a different country. The answer is ${answer}`,
+        `A real country, just not this one. The answer is ${answer}`,
+        `To be fair, ${esc(the(matched))} does exist. The answer is ${answer}`,
+      ]);
+    } else detail = `The answer is ${answer}`;
   }
 
   // Overruling only makes sense for typed names, e.g. a spelling the game does not know. A
@@ -408,7 +473,7 @@ function amountFeedback({ country, type }: Prompt, verdict: Verdict, { skipped, 
       ? `<p class="verdict good">Correct</p>`
       : verdict.result === "close"
         ? `<p class="verdict close">Close</p>`
-        : `<p class="verdict bad">${skipped ? "Here it is" : "Not quite"}</p>`;
+        : wrongHeadline(skipped);
   const what = population ? `The population of ${the(country.name)}` : `GDP per capita in ${the(country.name)}`;
   let detail = `${esc(what)} is <b>${format(figure.value)}</b> (World Bank, ${esc(figure.year)}).`;
   if (guess !== undefined) detail += ` You said ${format(guess)}, ${describeMiss(guess, figure.value)}.`;
@@ -429,36 +494,223 @@ function factsCard(c: Country) {
   </div>`;
 }
 
-function showPlacementResults() {
-  const placement = session!.placement!;
-  const results = placement.results();
-  const known = placement.knownKeys();
-  deck.markKnown(known);
+/** Headlines for a wrong answer, one picked at random each time. */
+const WRONG_HEADLINES = ["Nope", "Not quite", "Afraid not", "Alas", "No such luck"];
+
+function wrongHeadline(skipped?: boolean) {
+  return `<p class="verdict bad">${skipped ? "Here it is" : oneOf("wrong", WRONG_HEADLINES)}</p>`;
+}
+
+// ---------------------------------------------------------------- quiz
+
+function showQuizSetup() {
+  if (session) lastSession = session;
   session = null;
   doneButton.hidden = true;
   globe.onTap = undefined;
   globe.setHighlights([]);
+  globe.setKnowledge(new Map());
+  globe.spin(true);
   updateCounts();
 
-  panel.innerHTML = `<h2>Here's where you're starting</h2>
-    <p class="muted">Roughly how many of the best-known countries you already know:</p>
-    <div class="stats">
-      ${results.map((r) => `<div class="stat"><b>${r.known}</b><span>${r.label.toLowerCase()}</span></div>`).join("")}
+  panel.innerHTML = `<h2>How many countries do you know?</h2>
+    <p class="muted">The quiz adapts to your answers, getting harder when you're right and easier when
+      you're not. At the end you'll get an estimate of how much you know, and your practice starts from
+      there.</p>
+    <fieldset><legend>Quiz me on</legend>
+      ${SKILLS.map(
+        (s) => `<label class="check"><input type="checkbox" data-skill="${s.skill}" ${quizChoice.skills.includes(s.skill) ? "checked" : ""}>
+          <span>${s.label} <span class="muted">· ${s.hint}</span></span></label>`,
+      ).join("")}
+    </fieldset>
+    <fieldset><legend>Length</legend>
+      <div class="modes" role="group" aria-label="Quiz length">
+        ${QUIZ_LENGTHS.map((l) => `<button data-length="${l.id}">${l.label}</button>`).join("")}
+      </div>
+      <p class="muted" id="quiz-size"></p>
+    </fieldset>
+    <div class="row">
+      <button class="btn primary" id="go">Start the quiz</button>
+      <button class="btn" id="back">Back</button>
+    </div>`;
+
+  const update = () => {
+    const n = quizSize(quizChoice.length, quizChoice.skills.length);
+    // About ten seconds a question.
+    $("#quiz-size").textContent = n ? `${n} questions, about ${Math.max(1, Math.round(n / 6))} minutes.` : "Pick at least one.";
+    $<HTMLButtonElement>("#go").disabled = n === 0;
+    panel.querySelectorAll<HTMLButtonElement>("[data-length]").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.dataset.length === quizChoice.length));
+    });
+  };
+  panel.querySelectorAll<HTMLInputElement>("[data-skill]").forEach((box) => {
+    box.onchange = () => {
+      quizChoice.skills = [...panel.querySelectorAll<HTMLInputElement>("[data-skill]:checked")].map((b) => b.dataset.skill as Skill);
+      update();
+    };
+  });
+  panel.querySelectorAll<HTMLButtonElement>("[data-length]").forEach((b) => {
+    b.onclick = () => {
+      quizChoice.length = b.dataset.length as QuizLength;
+      update();
+    };
+  });
+  $("#go").onclick = startQuiz;
+  $("#back").onclick = showHome;
+  update();
+}
+
+function startQuiz() {
+  const quiz = new Quiz(deck.model, quizChoice.skills, quizChoice.length, (id, type) => !!deck.prompt(id, type));
+  session = { answered: 0, correct: 0, recent: [], quiz: { quiz, graded: [], applied: 0, remembered: 0, missed: 0 } };
+  nextQuestion();
+}
+
+function showQuizResults() {
+  const run = session!.quiz!;
+  const { quiz } = run;
+  if (!quiz.done) return showHome();
+  const outcome = deck.applyQuiz(quiz.skills, run.graded.slice(run.applied), run.applied > 0);
+  run.applied = run.graded.length;
+  run.remembered += outcome.remembered;
+  run.missed += outcome.missed;
+  session = null;
+  doneButton.hidden = true;
+  globe.onTap = undefined;
+  globe.setHighlights([]);
+  // Held still and zoomed out, to show off the coloured map below.
+  globe.spin(false);
+  globe.zoomOutTo(1);
+  updateCounts();
+
+  const results = quiz.results();
+  const [main, ...others] = results;
+  const areas = quiz.areas();
+  const unsure = results.some((r) => r.high - r.low > NARROW_ABOVE);
+  const { remembered, missed } = run;
+  const notes = [
+    remembered &&
+      `${remembered === 1 ? "The one you got right is" : `The ${remembered} you got right are`} now in long-term
+       memory, so ${remembered === 1 ? "it'll" : "they'll"} only come back in a month or two.`,
+    outcome.inferred &&
+      `We've also marked ${outcome.inferred} ${outcome.inferred === 1 ? "card" : "cards"} you very likely know. We'll
+       still quiz you on the ones we're less sure of over the next few weeks, just to double-check.`,
+    missed && `${missed === 1 ? "The one you missed comes" : `The ${missed} you missed come`} back first when you start learning.`,
+  ].filter(Boolean);
+
+  panel.innerHTML = `<div class="result">
+      <p class="result-lead">You know about</p>
+      <p class="result-number">${Math.round(main.known)}</p>
+      <p class="result-of">of ${main.of} ${skillInfo(main.skill).noun}</p>
+      ${hasRange(main) ? `<p class="muted">Probably between ${Math.round(main.low)} and ${Math.round(main.high)}</p>` : ""}
+      ${
+        others.length
+          ? `<div class="result-others">${others
+              .map(
+                (r) => `<div><b>${Math.round(r.known)}</b> ${skillInfo(r.skill).noun}
+                  ${hasRange(r) ? `<span class="muted">${Math.round(r.low)} to ${Math.round(r.high)}</span>` : ""}</div>`,
+              )
+              .join("")}</div>`
+          : ""
+      }
     </div>
-    <p>${
-      known.length
-        ? `${known.length} cards are marked as known. They'll come up for a quick check over the next four
-           weeks, so anything you've forgotten gets caught. New cards start from where you are.`
-        : "No problem: you'll start with the best-known countries and build up from there."
-    }</p>
+    ${areas ? `<p>You know ${esc(areas.strongest)} best, and ${esc(areas.weakest)} least.</p>` : ""}
+    <div class="row">
+      <button class="btn" id="share">Share your result</button>
+      ${unsure ? `<button class="btn" id="narrow">Narrow it down: ${NARROW_MORE} more</button>` : ""}
+    </div>
+    <p class="muted" id="share-note" hidden></p>
+    ${notes.map((n) => `<p>${n}</p>`).join("")}
     <div id="legend"></div>
     <div class="row">
-      <button class="btn primary" id="go">Start learning</button>
+      <button class="btn primary" id="go">Learn the rest</button>
       <button class="btn" id="home">Home</button>
     </div>`;
-  showKnowledge($("#legend"));
+
+  showQuizMap($("#legend"), quiz, null);
+  $<HTMLButtonElement>("#share").onclick = (e) => shareResult(e.currentTarget as HTMLButtonElement, results);
+  if (unsure) {
+    $("#narrow").onclick = () => {
+      quiz.extend(NARROW_MORE);
+      session = { answered: 0, correct: 0, recent: [], quiz: run };
+      nextQuestion();
+    };
+  }
   $("#go").onclick = () => startRound();
   $("#home").onclick = showHome;
+}
+
+/** Colours the globe by what the quiz thinks the player knows, for one skill or all of them. */
+function showQuizMap(legend: HTMLElement, quiz: Quiz, mode: Skill | null) {
+  const skills = mode ? [mode] : quiz.skills;
+  const knowledge = new Map<string, Knowledge>();
+  for (const c of world.countries) {
+    const p = skills.reduce((sum, s) => sum + quiz.chance(c.id, s), 0) / skills.length;
+    knowledge.set(c.id, p >= 0.75 ? "known" : p >= 0.35 ? "learning" : "weak");
+  }
+  globe.setKnowledge(knowledge);
+
+  const modes: [Skill | null, string][] = [[null, "All"], ...quiz.skills.map((s): [Skill, string] => [s, skillInfo(s).label])];
+  legend.innerHTML = `<div class="legend">
+    ${
+      quiz.skills.length > 1
+        ? `<div class="modes" role="group" aria-label="Colour the globe by">
+            ${modes.map(([id, label]) => `<button data-mode="${id ?? ""}" aria-pressed="${id === mode}">${label}</button>`).join("")}
+          </div>`
+        : ""
+    }
+    <div class="key">
+      <span><i class="swatch known"></i>Likely known</span>
+      <span><i class="swatch learning"></i>Not sure</span>
+      <span><i class="swatch weak"></i>Not yet</span>
+    </div>
+  </div>`;
+  legend.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
+    b.onclick = () => showQuizMap(legend, quiz, (b.dataset.mode || null) as Skill | null);
+  });
+}
+
+/**
+ * Shares the result with a link that opens the quiz: the share sheet on phones, the clipboard
+ * elsewhere, or the text to copy by hand when neither works.
+ */
+async function shareResult(button: HTMLButtonElement, results: SkillResult[]) {
+  const [main, ...others] = results;
+  const noun = (r: SkillResult) => skillInfo(r.skill).noun;
+  // The likely range is an 80% one (RANGE_Z in knowledge.ts); only the first count gets it.
+  const lead = hasRange(main)
+    ? `I'm 80% sure I know between ${Math.round(main.low)} and ${Math.round(main.high)} of ${main.of} ${noun(main)}`
+    : `I know ${Math.round(main.known)} of ${main.of} ${noun(main)}`;
+  const rest = others.length ? `, plus about ${listed(others.map((r) => `${Math.round(r.known)} ${noun(r)}`))}` : "";
+  const text = `${lead}${rest} 🌍 How many do you know?`;
+  const url = `${location.origin}${import.meta.env.BASE_URL}?quiz`;
+  const note = $("#share-note");
+  if (navigator.share && matchMedia("(pointer: coarse)").matches) {
+    try {
+      await navigator.share({ text, url });
+      return;
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text} ${url}`);
+    button.textContent = "Copied";
+    note.textContent = "Copied to the clipboard, ready to paste anywhere.";
+  } catch {
+    note.textContent = `${text} ${url}`;
+  }
+  note.hidden = false;
+}
+
+/** False once a count's likely range has narrowed to a single number. */
+function hasRange(r: SkillResult) {
+  return Math.round(r.low) !== Math.round(r.high);
+}
+
+/** "a, b and c" */
+function listed(parts: string[]) {
+  return parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /** Ends a round, first suggesting a few more if it was very short. */
@@ -470,8 +722,7 @@ function stopRound() {
   globe.onTap = undefined;
   const left = NUDGE_BELOW - s.answered;
   panel.innerHTML = `<h2>Stopping already?</h2>
-    <p>You've answered ${s.answered}. ${left === 1 ? "One more" : `Another ${left}`} would help this round stick, but
-      it's up to you.</p>
+    <p>You've answered ${s.answered}. ${left === 1 ? "One more?" : `${left} more?`}</p>
     <div class="row">
       <button class="btn primary" id="more">Keep going</button>
       <button class="btn" id="stop">Stop here</button>
@@ -505,13 +756,13 @@ function showSettings() {
     </fieldset>
     <fieldset><legend>New cards per day</legend>
       <input type="number" id="per-day" min="0" max="100" value="${s.newPerDay}">
-      <p class="muted">Your pace, not a limit: after this many, new cards come more and more slowly so
-        reviews don't pile up, but you can keep playing. 0 means no new cards.</p>
+      <p class="muted">New cards slow down after this many each day, to keep reviews manageable. 0 turns
+        new cards off.</p>
     </fieldset>
-    <fieldset><legend>Placement round</legend>
-      <p class="muted">Already know more than the game thinks? Take the placement round again to skip ahead.
-        It only adds to what you know, it never resets anything.</p>
-      <button class="btn" id="replace">Take the placement round</button>
+    <fieldset><legend>Quiz</legend>
+      <p class="muted">Retake the quiz to skip ahead on anything you already know. Cards you've already
+        answered stay as they are.</p>
+      <button class="btn" id="replace">Take the quiz</button>
     </fieldset>
     <fieldset><legend>Your data</legend>
       <p class="muted">Progress is saved in this browser only. To move it to another device, export it
@@ -564,7 +815,7 @@ function showSettings() {
       showHome();
     }
   };
-  $("#replace").onclick = startPlacement;
+  $("#replace").onclick = showQuizSetup;
   $("#back").onclick = showHome;
 }
 
@@ -587,6 +838,23 @@ function the(name: string) {
 
 function sentence(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** The full stop for a sentence ending in `s`, unless `s` already has one ("Washington, D.C."). */
+function stop(s: string) {
+  return s.endsWith(".") ? "" : ".";
+}
+
+/** The version last picked from each set by `oneOf`. */
+const lastPicked = new Map<string, number>();
+
+/** One of `versions` at random, never the same one twice in a row from the same `set`. */
+function oneOf(set: string, versions: string[]) {
+  const skip = versions.length > 1 ? lastPicked.get(set) : undefined;
+  let i = Math.floor(Math.random() * (versions.length - (skip === undefined ? 0 : 1)));
+  if (skip !== undefined && i >= skip) i++;
+  lastPicked.set(set, i);
+  return versions[i];
 }
 
 function esc(s: string) {

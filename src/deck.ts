@@ -1,6 +1,8 @@
 import { DefaultScheduler, Rating, State, type DefaultSchedulerCard } from "ts-fsrs";
 import { normalize } from "./answers";
 import type { Country, World } from "./data";
+import { browserHomeArea } from "./home";
+import { KnowledgeModel, MIX_UP_WEIGHT, mixUpSkill, skillInfo, skillOf, type Observation, type Skill } from "./knowledge";
 import { POPULATION_MIN } from "./numbers";
 
 export type QuestionType = "locate" | "identify" | "flag" | "capital" | "capitalLocate" | "population" | "gdpPerCapita";
@@ -45,8 +47,34 @@ interface Saved {
    */
   days: Record<string, { introduced: number; extra?: number }>;
   settings: Settings;
-  /** When the placement round was finished, if ever. */
+  /** When the quiz (formerly the placement round) was last finished, if ever. */
   placedAt?: number;
+  /**
+   * Cards filled in as very likely known, without being asked. A card stays filled in only
+   * until it is first answered; marks on cards answered since are tidied away now and then.
+   */
+  inferred: Record<string, true>;
+  /** The last quiz, kept so its estimate can be refined by later answers. */
+  quiz?: SavedQuiz;
+}
+
+interface SavedQuiz {
+  /** When its answers went into the deck. First answers after this refine its estimate. */
+  at: number;
+  skills: Skill[];
+  answers: [id: string, skill: Skill, right: 0 | 1][];
+  /** Other countries named by wrong answers (see `MIX_UP_WEIGHT`). Missing in older saves. */
+  mixUps?: [id: string, skill: Skill][];
+}
+
+/** What a quiz did to the deck, for the results screen. */
+export interface QuizOutcome {
+  /** Right answers to cards not started before, now in long-term memory. */
+  remembered: number;
+  /** Misses, to be asked again soon. */
+  missed: number;
+  /** Cards filled in as very likely known. */
+  inferred: number;
 }
 
 export interface Prompt {
@@ -62,8 +90,19 @@ const MAX_LOG = 50_000;
 const NEW_CARD_WINDOW = 20;
 /** Cards already started avoid only this many of the most recent countries. */
 const REVIEW_AVOIDS_RECENT = 3;
-/** Cards marked as already known get their first check spread over this many days. */
-const KNOWN_FIRST_CHECK_DAYS = [2, 28];
+/** A quiz answer right on a card not started before: first asked again this many days later. */
+const REMEMBERED_DAYS = [30, 90];
+/** The quiz fills in cards the player knows with at least this chance... */
+const INFER_AT = 0.8;
+/** ...never counting a country mixed up with another in the quiz as more likely than this. */
+const MIXED_UP_CHANCE = 0.5;
+/** ...and takes a filled-in card back (until it is asked) if later answers drop it below this. */
+const RETRACT_BELOW = 0.6;
+/**
+ * A filled-in card is first checked after this many days at the `INFER_AT` chance, later the
+ * surer the estimate (about 3 weeks at 95%, 2.5 months at 99%), up to the second number.
+ */
+const FIRST_CHECK_DAYS = [5, 120];
 const DAY_MS = 86_400_000;
 /** A card counts as known once FSRS expects it to be remembered this many days or more. */
 const KNOWN_STABILITY_DAYS = 14;
@@ -122,6 +161,7 @@ function withDefaults(saved: Partial<Settings> | undefined): Settings {
 
 export class Deck {
   private candidates: Prompt[];
+  private byKey: Map<string, Prompt>;
   /** Answers given so far, counting from the start of the log. */
   private answered = 0;
   /**
@@ -131,6 +171,8 @@ export class Deck {
   private lastAsked = new Map<string, number>();
   private misses = new Map<string, number>();
   private missedInARow = new Map<string, number>();
+  /** What the player likely knows, from the last quiz and the answers since. */
+  readonly model: KnowledgeModel;
 
   private constructor(
     private scheduler: Scheduler,
@@ -138,6 +180,8 @@ export class Deck {
     private state: Saved,
   ) {
     this.candidates = buildCandidates(world);
+    this.byKey = new Map(this.candidates.map((c) => [c.key, c]));
+    this.model = new KnowledgeModel(world.countries, browserHomeArea(world.countries));
     this.readHistory();
   }
 
@@ -171,14 +215,14 @@ export class Deck {
     this.save();
   }
 
-  /** True for a new player, who is offered the placement round. */
+  /** True for a new player, who is offered the quiz. */
   get isFresh(): boolean {
     return !this.state.placedAt && Object.keys(this.state.cards).length === 0;
   }
 
   /** The question for this country and type, if it is one the game asks. */
   prompt(countryId: string, type: QuestionType): Prompt | undefined {
-    return this.candidates.find((c) => c.country.id === countryId && c.type === type);
+    return this.byKey.get(`${countryId}|${type}`);
   }
 
   /**
@@ -307,8 +351,8 @@ export class Deck {
     const scores = new Map<string, number[]>();
     for (const c of this.started()) {
       if (!types.includes(c.type)) continue;
-      // Cards marked known by the placement round have not been asked yet: trust the estimate.
-      const score = this.lastAsked.has(c.key) ? cardScore(c.card, now) : 2;
+      // Cards filled in by the quiz have not been asked yet: trust the estimate.
+      const score = this.isInferred(c.key) ? 2 : cardScore(c.card, now);
       scores.set(c.id, [...(scores.get(c.id) ?? []), score]);
     }
     const result = new Map<string, Knowledge>();
@@ -352,22 +396,167 @@ export class Deck {
   }
 
   /**
-   * Adds cards the player very likely knows already (from the placement round), as if
-   * answered correctly. Their first check is spread over the coming weeks so they do not
-   * all fall due on the same day. These do not count towards the daily new-card limit.
+   * Adds a quiz's answers (only those not added before) and fills in the cards the player very
+   * likely knows. A right answer to a card not started before goes straight to long-term memory,
+   * to come back in a month or two; a miss is asked again soon, like any miss; cards already
+   * started are reviewed as usual. `mixedUpWith` is the other country a wrong answer named, if
+   * any. `continuing` adds to the last quiz ("narrow it down") rather than replacing it.
    */
-  markKnown(keys: string[]) {
-    const now = new Date();
-    const [min, max] = KNOWN_FIRST_CHECK_DAYS;
-    for (const key of keys) {
-      if (this.state.cards[key]) continue;
-      const blank = this.scheduler.newCard({ now }) as Card;
-      const reviewed = this.scheduler.review({ card: blank, grade: Rating.Good, now }).card as Card;
-      const dueAt = new Date(now.getTime() + (min + Math.random() * (max - min)) * DAY_MS);
-      this.state.cards[key] = { ...reviewed, dueAt };
+  applyQuiz(
+    skills: readonly Skill[],
+    answers: { prompt: Prompt; grade: Grade; mixedUpWith?: string }[],
+    continuing: boolean,
+  ): QuizOutcome {
+    let remembered = 0;
+    let missed = 0;
+    for (const { prompt, grade } of answers) {
+      const { key } = prompt;
+      // A filled-in card never asked is only a guess: an answer starts it afresh.
+      if (this.isInferred(key)) delete this.state.cards[key];
+      if (!this.state.cards[key] && grade === Rating.Good) {
+        this.state.cards[key] = this.settled(new Date(), between(REMEMBERED_DAYS));
+        this.log(key, Rating.Good);
+        remembered++;
+      } else {
+        this.answer(prompt, grade);
+        if (grade === Rating.Again) missed++;
+      }
     }
-    this.state.placedAt = now.getTime();
+    const added = answers.map(({ prompt, grade }): [string, Skill, 0 | 1] => [
+      prompt.country.id,
+      skillOf(prompt.type)!,
+      grade === Rating.Again ? 0 : 1,
+    ]);
+    const mixUps = answers.flatMap(({ prompt, grade, mixedUpWith }): [string, Skill][] => {
+      const skill = mixUpSkill(prompt.type);
+      return grade === Rating.Again && mixedUpWith && skill ? [[mixedUpWith, skill]] : [];
+    });
+    const previous = continuing ? this.state.quiz : undefined;
+    const now = Date.now();
+    this.state.quiz = {
+      at: now,
+      skills: [...skills],
+      answers: [...(previous?.answers ?? []), ...added],
+      mixUps: [...(previous?.mixUps ?? []), ...mixUps],
+    };
+    this.state.placedAt = now;
+    const inferred = this.syncInferred(true);
     this.save();
+    return { remembered, missed, inferred };
+  }
+
+  /**
+   * Refines the last quiz's estimate with the first answers given since, and takes back filled-in
+   * cards it is no longer sure of; those it is less sure of are checked sooner.
+   */
+  refreshEstimate() {
+    if (!this.state.quiz) return;
+    this.syncInferred(false);
+    this.save();
+  }
+
+  /**
+   * The evidence for the knowledge model: the last quiz's answers (and its mix-ups, counted
+   * as part misses), then the first answer about each country in each skill since (for instance
+   * the first check of a filled-in card). Later answers are left out, as by then the player has
+   * been learning, and so are first answers about a country the quiz showed in its feedback.
+   */
+  private observations(): Observation[] {
+    const quiz = this.state.quiz;
+    if (!quiz) return [];
+    const mixUps = quiz.mixUps ?? [];
+    const list: Observation[] = [
+      ...quiz.answers.map(([id, skill, right]) => ({ id, skill, right: right === 1 })),
+      ...mixUps.map(([id, skill]) => ({ id, skill, right: false, weight: MIX_UP_WEIGHT })),
+    ];
+    const seen = new Set([...quiz.answers, ...mixUps].map(([id, skill]) => `${id}|${skill}`));
+    for (const [key, grade, time] of this.state.log) {
+      const { id, type } = parseKey(key);
+      const skill = skillOf(type);
+      if (!skill || seen.has(`${id}|${skill}`)) continue;
+      seen.add(`${id}|${skill}`);
+      if (time > quiz.at) list.push({ id, skill, right: grade !== Rating.Again });
+    }
+    return list;
+  }
+
+  /**
+   * Brings the filled-in cards for the last quiz's skills in line with the current estimate:
+   * fills in cards known with a chance of `INFER_AT` or more (only when `add`), takes back
+   * filled-in cards below `RETRACT_BELOW`, and moves a check sooner when the estimate has become
+   * less sure. Cards that have been answered are never touched. Returns how many cards are
+   * filled in for those skills.
+   */
+  private syncInferred(add: boolean): number {
+    const quiz = this.state.quiz;
+    if (!quiz) return 0;
+    const observations = this.observations();
+    const estimate = this.model.fit(observations);
+    const direct = observations.filter((o) => o.weight === undefined);
+    const answered = new Map(direct.map((o) => [`${o.id}|${o.skill}`, o.right]));
+    const mixedUp = new Set((quiz.mixUps ?? []).map(([id, skill]) => `${id}|${skill}`));
+    const chance = (id: string, skill: Skill) => {
+      const right = answered.get(`${id}|${skill}`);
+      if (right !== undefined) return Number(right);
+      const p = estimate.chance(id, skill);
+      return mixedUp.has(`${id}|${skill}`) ? Math.min(p, MIXED_UP_CHANCE) : p;
+    };
+    const now = Date.now();
+    let count = 0;
+    for (const skill of quiz.skills) {
+      for (const type of skillInfo(skill).types) {
+        for (const country of this.world.countries) {
+          const key = this.prompt(country.id, type)?.key;
+          if (!key) continue;
+          // Finding a country from its capital needs both the capital and the map.
+          const p = type === "capitalLocate" ? chance(country.id, "capital") * chance(country.id, "map") : chance(country.id, skill);
+          const card = this.state.cards[key];
+          if (!card) {
+            if (add && p >= INFER_AT) {
+              this.state.cards[key] = this.settled(new Date(now), firstCheckDays(p));
+              this.state.inferred[key] = true;
+              count++;
+            }
+          } else if (this.isInferred(key)) {
+            if (p < RETRACT_BELOW) {
+              delete this.state.cards[key];
+              delete this.state.inferred[key];
+              continue;
+            }
+            // Only when the check is due later than the latest this chance would give, so
+            // repeated refreshes do not keep nudging it.
+            if (card.dueAt.getTime() > now + firstCheckDays(p, 1.25) * DAY_MS) {
+              card.dueAt = new Date(now + firstCheckDays(p) * DAY_MS);
+            }
+            count++;
+          }
+        }
+      }
+    }
+    for (const key of Object.keys(this.state.inferred)) if (!this.isInferred(key)) delete this.state.inferred[key];
+    return count;
+  }
+
+  /** Filled in by the quiz and not asked since. */
+  private isInferred(key: string): boolean {
+    return !!this.state.inferred[key] && !!this.state.cards[key] && !this.lastAsked.has(key);
+  }
+
+  /**
+   * A card as if answered right, that FSRS expects to be remembered for `days` (its stability:
+   * 90% recall after that long), and first asked again then.
+   */
+  private settled(now: Date, days: number): Card {
+    const blank = this.scheduler.newCard({ now }) as Card;
+    const reviewed = this.scheduler.review({ card: blank, grade: Rating.Good, now }).card as Card;
+    return { ...reviewed, stability: days, scheduledDays: days, dueAt: new Date(now.getTime() + days * DAY_MS) };
+  }
+
+  /** Adds an answer to the log without scheduling anything. */
+  private log(key: string, grade: Grade) {
+    this.state.log.push([key, grade, Date.now()]);
+    if (this.state.log.length > MAX_LOG) this.state.log.splice(0, this.state.log.length - MAX_LOG);
+    this.remember(key, grade);
   }
 
   /** Cards due now, cards still being learned, and how many of all the cards are started. */
@@ -399,7 +588,7 @@ export class Deck {
   importJson(text: string) {
     const parsed = revive(JSON.parse(text));
     if (parsed?.version !== 1 || typeof parsed.cards !== "object") throw new Error("Not a Topos progress file");
-    this.state = { ...emptyState(), ...parsed, settings: withDefaults(parsed.settings) };
+    this.state = { ...emptyState(), ...withInferred(parsed), settings: withDefaults(parsed.settings) };
     this.readHistory();
     this.save();
   }
@@ -438,6 +627,24 @@ function buildCandidates(world: World): Prompt[] {
     }
   }
   return list.sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Days until a filled-in card is first checked, for the chance the player knows it; see
+ * `FIRST_CHECK_DAYS`. Varied by `jitter` so cards filled in together do not fall due together.
+ */
+function firstCheckDays(p: number, jitter = 0.75 + Math.random() * 0.5): number {
+  const [first, last] = FIRST_CHECK_DAYS;
+  const surer = logit(Math.min(p, 0.999)) - logit(INFER_AT);
+  return clamp(first * Math.exp(0.85 * surer), 3, last) * jitter;
+}
+
+function logit(p: number) {
+  return Math.log(p / (1 - p));
+}
+
+function between([min, max]: number[]) {
+  return min + Math.random() * (max - min);
 }
 
 /** 0 for a card that keeps being missed, 1 while being learned, 2 once known. */
@@ -482,18 +689,30 @@ function parseKey(key: string) {
 }
 
 function emptyState(): Saved {
-  return { version: 1, cards: {}, log: [], days: {}, settings: structuredClone(DEFAULT_SETTINGS) };
+  return { version: 1, cards: {}, log: [], days: {}, settings: structuredClone(DEFAULT_SETTINGS), inferred: {} };
 }
 
 function load(): Saved | null {
   try {
     const text = localStorage.getItem(STORAGE_KEY);
     if (!text) return null;
-    const s = revive(JSON.parse(text));
+    const s = withInferred(revive(JSON.parse(text)));
     return { ...emptyState(), ...s, settings: withDefaults(s.settings) };
   } catch {
     return null;
   }
+}
+
+/**
+ * Progress saved before filled-in cards were marked: the cards never answered are the ones the
+ * old placement round filled in.
+ */
+function withInferred(s: Saved): Saved {
+  if (s.inferred) return s;
+  const answered = new Set((s.log ?? []).map(([key]) => key));
+  const inferred: Record<string, true> = {};
+  for (const key of Object.keys(s.cards ?? {})) if (!answered.has(key)) inferred[key] = true;
+  return { ...s, inferred };
 }
 
 /** JSON turns the card dates into strings; turn them back. */

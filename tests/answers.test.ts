@@ -19,8 +19,8 @@ test("exact answers, ignoring case, accents and 'the'", () => {
 });
 
 test("Niger never passes for Nigeria, nor the other way round", () => {
-  assert.deepEqual(countries.check("NGA", "Niger"), { result: "wrong", matched: "Niger" });
-  assert.deepEqual(countries.check("NER", "Nigeria"), { result: "wrong", matched: "Nigeria" });
+  assert.deepEqual(countries.check("NGA", "Niger"), { result: "wrong", matched: "Niger", matchedKey: "NER" });
+  assert.deepEqual(countries.check("NER", "Nigeria"), { result: "wrong", matched: "Nigeria", matchedKey: "NGA" });
 });
 
 test("small typos pass as close, unless nearer to another answer", () => {
