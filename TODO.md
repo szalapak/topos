@@ -97,7 +97,7 @@ Only tested in a desktop browser at phone size so far. Check:
   `src/deck.ts` (`MISSED_WEIGHT`, `NEW_SHARE` and so on), tuned against a simulated player
   (Nov 2026). Worth checking against real logs after a few weeks: how soon missed cards
   return, how many new cards arrive per day, whether due piles keep growing.
-- **More automated tests**: `npm test` covers `src/answers.ts`, `src/numbers.ts`, and the quiz
+- **More automated tests**: `npm test` covers `src/answers.ts`, `src/numbers.ts`, `src/stats.ts`, and the quiz
   and its model (`tests/quiz.test.ts`, with simulated players). Still untested: the card
   picking in `src/deck.ts` (a missed card must not repeat straight away; a simulated player
   over a few weeks, as used for tuning, with fake time) and how the deck takes in a quiz
@@ -133,3 +133,8 @@ Only tested in a desktop browser at phone size so far. Check:
   "45", "45k", "45000" and decimal commas. Countries under 2,000 people (Vatican City) are not asked their population.
   The feedback card shows both figures for every country.
 - Unit tests with Node's built-in runner (`npm test`), run before every deploy.
+- A stats screen, "How it's going" (Nov 2026), opened from the top bar's counter or a home
+  link: streak, answers a day, how often cards are remembered when they come back, a calendar
+  of the last six months, and countries known per group with a line of how each has grown.
+  Everything but the lines comes from the answer log, so it covers past play too; the lines
+  come from a daily count saved in `days` and start from the day this shipped.

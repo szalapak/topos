@@ -4,6 +4,7 @@ import type { Country, World } from "./data";
 import { browserHomeArea } from "./home";
 import { KnowledgeModel, MIX_UP_WEIGHT, mixUpSkill, skillInfo, skillOf, type Observation, type Skill } from "./knowledge";
 import { POPULATION_MIN } from "./numbers";
+import type { Answer } from "./stats";
 
 export type QuestionType = "locate" | "identify" | "flag" | "capital" | "capitalLocate" | "population" | "gdpPerCapita";
 
@@ -21,6 +22,17 @@ export const QUESTION_TYPES: { type: QuestionType; label: string; offset: number
 
 /** Question types answered with a number, graded by closeness (see `src/numbers.ts`). */
 export const AMOUNT_TYPES = ["population", "gdpPerCapita"] as const satisfies readonly QuestionType[];
+
+/**
+ * The ways of grouping what a player knows: to colour the globe between rounds, and on the stats
+ * screen. The ids are saved in each day's record of countries known, so keep them.
+ */
+export const KNOWLEDGE_GROUPS: readonly { id: string; label: string; types: readonly QuestionType[] }[] = [
+  { id: "map", label: "Countries", types: skillInfo("map").types },
+  { id: "flag", label: "Flags", types: skillInfo("flag").types },
+  { id: "capital", label: "Capitals", types: skillInfo("capital").types },
+  { id: "numbers", label: "Numbers", types: AMOUNT_TYPES },
+];
 
 export type Grade = (typeof Rating)["Again" | "Hard" | "Good"];
 
@@ -43,9 +55,11 @@ interface Saved {
   log: LogEntry[];
   /**
    * New cards introduced per local date. `extra` is left over from the old daily allowance
-   * ("Learn 5 more") and is no longer used.
+   * ("Learn 5 more") and is no longer used. `known` is how many countries were known in each of
+   * `KNOWLEDGE_GROUPS` as of the last save that day, for the stats screen; days before Nov 2026
+   * don't have it.
    */
-  days: Record<string, { introduced: number; extra?: number }>;
+  days: Record<string, { introduced: number; extra?: number; known?: Record<string, number> }>;
   settings: Settings;
   /** When the quiz (formerly the placement round) was last finished, if ever. */
   placedAt?: number;
@@ -617,6 +631,43 @@ export class Deck {
     return { reviewing, answers: this.state.log.length };
   }
 
+  /** Every answer kept in the log, oldest first, for the stats screen. */
+  history(): Answer[] {
+    return this.state.log.map(([key, grade, time]) => ({ key, time, right: grade !== Rating.Again }));
+  }
+
+  /**
+   * For each of `KNOWLEDGE_GROUPS` with a question type switched on: how many countries are known
+   * now (as on the globe's key), out of how many the group has questions for.
+   */
+  knownNow(): { id: string; label: string; known: number; of: number }[] {
+    const enabled = this.state.settings.types;
+    return KNOWLEDGE_GROUPS.flatMap(({ id, label, types }) => {
+      const asked = new Set(this.candidates.filter((c) => enabled[c.type] && types.includes(c.type)).map((c) => c.country.id));
+      if (!asked.size) return [];
+      return [{ id, label, known: this.countKnown(types), of: asked.size }];
+    });
+  }
+
+  /** Countries known per group on each day recorded, oldest first, with today's worked out afresh. */
+  knownHistory(): [date: string, known: Record<string, number>][] {
+    const today = localDate();
+    const past = Object.entries(this.state.days).flatMap(([date, day]): [string, Record<string, number>][] =>
+      day.known && date < today ? [[date, day.known]] : [],
+    );
+    return [...past.sort(([a], [b]) => a.localeCompare(b)), [today, this.knownToday()]];
+  }
+
+  private countKnown(types: readonly QuestionType[]) {
+    let n = 0;
+    for (const k of this.knowledge(types).values()) if (k === "known") n++;
+    return n;
+  }
+
+  private knownToday(): Record<string, number> {
+    return Object.fromEntries(KNOWLEDGE_GROUPS.map(({ id, types }) => [id, this.countKnown(types)]));
+  }
+
   exportJson(): string {
     return JSON.stringify(this.state);
   }
@@ -641,6 +692,8 @@ export class Deck {
   }
 
   private save() {
+    // Kept up to date with every save, so each day ends with how much was known by then.
+    this.today().known = this.knownToday();
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
     } catch {

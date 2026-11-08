@@ -96,12 +96,37 @@ body {
   letter-spacing: 0.01em;
 }
 
+/* A button to the stats between rounds, with a small chart icon to say so. */
 .counts {
-  flex: 1;
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 4px 0;
   color: var(--muted);
   font-size: 14px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.counts:enabled {
+  cursor: pointer;
+}
+
+.counts:enabled:hover {
+  color: var(--text);
+}
+
+.counts:enabled::after {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  vertical-align: -2px;
+  background: currentColor;
+  -webkit-mask: var(--chart-icon) center / contain no-repeat;
+  mask: var(--chart-icon) center / contain no-repeat;
+  --chart-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 14.5h13v-1.5h-13zM2.5 12h2.5V7H2.5zm4.25 0h2.5V3h-2.5zM11 12h2.5V9H11z'/%3E%3C/svg%3E");
 }
 
 .globe-wrap {
@@ -377,6 +402,189 @@ form.answer .unit {
 .stat span {
   font-size: 12px;
   color: var(--muted);
+}
+
+.stat small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.panel h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 20px 0 2px;
+}
+
+/* The calendar of answers per day: one column a week, Monday at the top, shaded by how much was
+   played against the player's own typical day. */
+.calendar-wrap {
+  --cal-0: color-mix(in oklab, var(--line) 65%, var(--surface));
+  --cal-1: color-mix(in oklab, var(--accent) 28%, var(--surface));
+  --cal-2: color-mix(in oklab, var(--accent) 52%, var(--surface));
+  --cal-3: color-mix(in oklab, var(--accent) 76%, var(--surface));
+  --cal-4: var(--accent);
+  margin: 4px 0 8px;
+}
+
+.calendar {
+  display: grid;
+  grid-template-rows: auto repeat(7, auto);
+  grid-template-columns: repeat(var(--weeks), minmax(0, 1fr));
+  grid-auto-flow: column;
+  gap: 2px;
+}
+
+.cal-month {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: visible;
+  width: 0;
+}
+
+.day {
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--cal-0);
+}
+
+.day.s1 {
+  background: var(--cal-1);
+}
+
+.day.s2 {
+  background: var(--cal-2);
+}
+
+.day.s3 {
+  background: var(--cal-3);
+}
+
+.day.s4 {
+  background: var(--cal-4);
+}
+
+.day.today {
+  outline: 1.5px solid var(--text);
+  outline-offset: -1px;
+}
+
+.day.future {
+  visibility: hidden;
+}
+
+.cal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#cal-note {
+  min-height: 1.45em;
+}
+
+.cal-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.cal-key .day {
+  width: 10px;
+}
+
+/* Countries known per group, each with a line of how it has grown. */
+.known-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.known {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.known[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.known-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.known[aria-pressed="true"] .known-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.known-count {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.known-count b {
+  font-size: 22px;
+  color: var(--text);
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 30px;
+  margin: 2px 0;
+  overflow: visible;
+}
+
+.spark path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.spark-at {
+  stroke: var(--muted);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+#stats-key {
+  margin-bottom: 14px;
+}
+
+.known-change {
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .legend {

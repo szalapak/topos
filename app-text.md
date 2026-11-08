@@ -19,7 +19,8 @@ How to read it:
 **Top bar**
 
 - Brand: `Topos`
-- Counter, on the home screen: `{due} due · {learning} learning` (blank on a first visit)
+- Counter, on the home screen: `{due} due · {learning} learning` (blank on a first visit), with
+  a small chart icon. Tapping it opens How it's going; its tooltip is `How it's going`.
 - Counter, during a round: `{right}/{answered} right · {due} due`
 - Counter, during the quiz: `Quiz {answered} of {total}`
 - Button during a round or quiz: `Done`
@@ -66,12 +67,72 @@ How to read it:
 >
 > *(globe key, see below)*
 >
-> How many countries do you know? Take the quiz · Settings and your data
+> How many countries do you know? Take the quiz · How it's going · Settings and your data
 
 **Globe key on the home screen**
 
 - Buttons to colour the globe by: `All` · `Countries` · `Flags` · `Capitals` · `Numbers`
 - Key: `Known {n}` · `Learning {n}` · `Needs work {n}`
+
+---
+
+## How it's going (stats)
+
+Opened from the top bar's counter or the home screen's link.
+
+> ## How it's going
+>
+> | **{n}** days in a row | **{n}** answers a day | **{n}%** remembered |
+>
+> *(calendar of the last six months, one square a day, darker for busier days)*
+>
+> {n} answers on {n} days in the last six months. · Less ▢▢▢▢▢ More
+>
+> ### What you know
+>
+> Countries you'd very likely still get right in two weeks. Tap one to colour the globe.
+>
+> *(a tile each for Countries, Flags, Capitals and Numbers, see below)*
+>
+> *(globe key, as on the home screen)*
+>
+> **Remembered** is how many cards you still knew when they came back, of those you'd got right
+> before, over the last 30 days. The schedule aims for about 9 in 10, bringing each card back
+> just before you'd forget it, so a few misses are part of the plan.
+>
+> [Back]
+
+**Small print under the three numbers**
+
+- Days in a row: `play today to keep it` (not played yet today), otherwise `best {n}` (when
+  the best run was longer), otherwise `your best yet`
+- Answers a day: `last 30 days`, or `so far` for someone who started more recently
+- Remembered: `when cards came back`; before any card has come back, the number reads `Soon`
+  and the line `once cards come back`. Under 10 cards back, the number is a count: `{n} of {n}`.
+
+**Calendar**
+
+- Pointing at (or tapping) a day replaces the line under it: `Mon 3 Nov: 42 answers, 8 new`
+  (`Today: ...`, `1 answer`, `no answers`; `, {n} new` only when some were)
+
+**Tiles**
+
+- Name: `Countries` · `Flags` · `Capitals` · `Numbers` (only those with a question type
+  switched on)
+- Count: **{n}** `of {total}`, with a small line of how it has grown
+- Change: `+{n} since 1 Nov`, `−{n} since 1 Nov` or `no change since 1 Nov`, against a week ago
+  (or the first day counted)
+- Pointing along the line shows that day instead: `3 Nov: 130`
+- Until there are two days to compare:
+  `Counting from today. A line of how each one grows fills in as you play.`
+
+**With no answers yet**
+
+> ## How it's going
+>
+> Nothing to show yet. Answer a few questions and come back.
+>
+> [Back]
 
 ---
 

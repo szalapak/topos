@@ -46,7 +46,11 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
   mistaken for another country or capital.
 - `src/numbers.ts` reads typed numbers ("34m", "34 million", "45k"), grades them by how close
   they are, and formats figures for display.
-- `src/main.ts` is the screens: home, questions, feedback and settings.
+- `src/stats.ts` works out the stats screen's numbers from the answer log: answers per day for
+  the calendar, streaks, the daily average, and how often cards are remembered when they come
+  back. How many countries are known is recorded once a day in the saved progress (`days` in
+  `src/deck.ts`), as it can't be worked out afterwards.
+- `src/main.ts` is the screens: home, questions, feedback, stats and settings.
 
 ## Data sources
 

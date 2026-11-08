@@ -1,15 +1,26 @@
 import "./style.css";
 import { AnswerSet, type Verdict } from "./answers";
 import { loadWorld, type Country, type World } from "./data";
-import { AMOUNT_TYPES, Deck, QUESTION_TYPES, Rating, type Grade, type Knowledge, type Prompt, type QuestionType } from "./deck";
+import {
+  AMOUNT_TYPES,
+  Deck,
+  KNOWLEDGE_GROUPS,
+  QUESTION_TYPES,
+  Rating,
+  type Grade,
+  type Knowledge,
+  type Prompt,
+  type QuestionType,
+} from "./deck";
 import { Globe } from "./globe";
 import { SKILLS, skillInfo, type Skill } from "./knowledge";
 import { describeMiss, formatDollars, formatPopulation, gradeAmount, readDollars, readPopulation } from "./numbers";
 import { Quiz, QUIZ_LENGTHS, quizSize, type QuizLength, type SkillResult } from "./quiz";
+import { calendar, change, dateKey, daysBetween, shade, summarize, typicalDay, type CalendarDay } from "./stats";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const panel = $("#panel");
-const counts = $("#counts");
+const counts = $<HTMLButtonElement>("#counts");
 const doneButton = $<HTMLButtonElement>("#done");
 
 let world: World;
@@ -47,12 +58,7 @@ const RECENT_KEPT = 8;
 /** Stopping before this many answers brings a gentle "a few more?" once per round. */
 const NUDGE_BELOW = 8;
 /** Ways to colour the globe between rounds, besides "All". */
-const GLOBE_MODES: { id: string; label: string; types: readonly QuestionType[] }[] = [
-  { id: "map", label: "Countries", types: skillInfo("map").types },
-  { id: "flag", label: "Flags", types: skillInfo("flag").types },
-  { id: "capital", label: "Capitals", types: skillInfo("capital").types },
-  { id: "numbers", label: "Numbers", types: AMOUNT_TYPES },
-];
+const GLOBE_MODES = KNOWLEDGE_GROUPS;
 /** What the quiz asks about and how long it is, kept for the rest of the visit. */
 const quizChoice: { skills: Skill[]; length: QuizLength } = {
   skills: SKILLS.filter((s) => s.byDefault).map((s) => s.skill),
@@ -75,6 +81,7 @@ async function init() {
   $("#zoom-in").onclick = () => globe.zoomBy(1.6);
   $("#zoom-out").onclick = () => globe.zoomBy(1 / 1.6);
   doneButton.onclick = () => (session?.quiz ? showQuizResults() : stopRound());
+  counts.onclick = showStats;
   trackVisibleArea();
   // Shared results link here with ?quiz, straight to the quiz.
   const params = new URLSearchParams(location.search);
@@ -146,12 +153,14 @@ function showHome() {
     <div id="legend"></div>
     <div class="row">
       <button class="link" id="quiz">How many countries do you know? Take the quiz</button>
+      <button class="link" id="stats">How it's going</button>
       <button class="link" id="settings">Settings and your data</button>
     </div>
   `;
   showKnowledge($("#legend"));
   $("#start").onclick = () => startRound();
   $("#quiz").onclick = showQuizSetup;
+  $("#stats").onclick = showStats;
   $("#settings").onclick = showSettings;
 }
 
@@ -181,23 +190,18 @@ const KNOWLEDGE_LABELS: [Knowledge, string][] = [
 
 /** Colours the globe by what the player knows, with a key and a choice of skill in `legend`. */
 function showKnowledge(legend: HTMLElement) {
-  const types = GLOBE_MODES.find((m) => m.id === globeMode)?.types ?? QUESTION_TYPES.map((q) => q.type);
-  const knowledge = deck.knowledge(types);
-  globe.setKnowledge(knowledge);
+  const knowledge = colourGlobe();
   if (!deck.counts().started) {
     legend.innerHTML = "";
     return;
   }
 
-  const tally = (kind: Knowledge) => [...knowledge.values()].filter((k) => k === kind).length;
   const modes: [string | null, string][] = [[null, "All"], ...GLOBE_MODES.map((m): [string, string] => [m.id, m.label])];
   legend.innerHTML = `<div class="legend">
     <div class="modes" role="group" aria-label="Colour the globe by">
       ${modes.map(([id, label]) => `<button data-mode="${id ?? ""}" aria-pressed="${id === globeMode}">${label}</button>`).join("")}
     </div>
-    <div class="key">
-      ${KNOWLEDGE_LABELS.map(([kind, label]) => `<span><i class="swatch ${kind}"></i>${label} <b>${tally(kind)}</b></span>`).join("")}
-    </div>
+    ${knowledgeKey(knowledge)}
   </div>`;
   legend.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
     b.onclick = () => {
@@ -205,6 +209,22 @@ function showKnowledge(legend: HTMLElement) {
       showKnowledge(legend);
     };
   });
+}
+
+/** Colours the globe by what the player knows, in the current `globeMode`. */
+function colourGlobe(): Map<string, Knowledge> {
+  const types = GLOBE_MODES.find((m) => m.id === globeMode)?.types ?? QUESTION_TYPES.map((q) => q.type);
+  const knowledge = deck.knowledge(types);
+  globe.setKnowledge(knowledge);
+  return knowledge;
+}
+
+/** "Known 12 · Learning 30 · Needs work 4", with swatches matching the globe. */
+function knowledgeKey(knowledge: Map<string, Knowledge>) {
+  const tally = (kind: Knowledge) => [...knowledge.values()].filter((k) => k === kind).length;
+  return `<div class="key">
+    ${KNOWLEDGE_LABELS.map(([kind, label]) => `<span><i class="swatch ${kind}"></i>${label} <b>${tally(kind)}</b></span>`).join("")}
+  </div>`;
 }
 
 function startRound() {
@@ -218,6 +238,9 @@ function updateCounts() {
   if (q) counts.textContent = `Quiz ${q.done} of ${q.total}`;
   else if (session) counts.textContent = `${session.correct}/${session.answered} right · ${c.due} due`;
   else counts.textContent = deck.isFresh ? "" : `${c.due} due · ${c.learning} learning`;
+  counts.hidden = !counts.textContent;
+  // Opens the stats between rounds; during one it would lose the question.
+  counts.disabled = !!session;
 }
 
 // ---------------------------------------------------------------- questions
@@ -786,6 +809,209 @@ function showNothingToAsk() {
     </div>`;
   $("#settings").onclick = showSettings;
   $("#home").onclick = showHome;
+}
+
+// ---------------------------------------------------------------- stats
+
+/** Weeks in the calendar: about six months. */
+const CALENDAR_WEEKS = 26;
+/** The daily average and the share remembered cover this many days. */
+const STATS_DAYS = 30;
+/** Below this many cards come back, the share remembered is a count ("7 of 8"), not a percentage. */
+const RECALL_MIN = 10;
+/** The lines of countries known go back this many days at most. */
+const KNOWN_DAYS_SHOWN = 90;
+
+/** How it's going: streak, calendar, daily average, share remembered, and what's known over time. */
+function showStats() {
+  if (session) lastSession = session;
+  session = null;
+  doneButton.hidden = true;
+  globe.onTap = undefined;
+  globe.setHighlights([]);
+  globe.spin(true);
+  updateCounts();
+  const knowledge = colourGlobe();
+
+  const now = new Date();
+  const today = dateKey(now);
+  const s = summarize(deck.history(), now, STATS_DAYS);
+  if (!s.days.size) {
+    panel.innerHTML = `<h2>How it's going</h2>
+      <p>Nothing to show yet. Answer a few questions and come back.</p>
+      <button class="btn primary" id="back">Back</button>`;
+    $("#back").onclick = showHome;
+    return;
+  }
+
+  const streakNote =
+    s.streak && !s.playedToday ? "play today to keep it" : s.longestStreak > s.streak ? `best ${s.longestStreak}` : s.streak > 1 ? "your best yet" : "";
+  const perDay = s.perDay < 10 ? String(Math.round(s.perDay * 10) / 10) : String(Math.round(s.perDay));
+  const recall =
+    s.reviews >= RECALL_MIN
+      ? `${Math.round((100 * s.remembered) / s.reviews)}%`
+      : s.reviews
+        ? `${s.remembered} of ${s.reviews}`
+        : "Soon";
+
+  panel.innerHTML = `<h2>How it's going</h2>
+    <div class="stats">
+      <div class="stat"><b>${s.streak}</b><span>${s.streak === 1 ? "day" : "days"} in a row</span>
+        ${streakNote ? `<small>${streakNote}</small>` : ""}</div>
+      <div class="stat"><b>${perDay}</b><span>answers a day</span>
+        <small>${s.averagedOver >= STATS_DAYS ? `last ${STATS_DAYS} days` : "so far"}</small></div>
+      <div class="stat"><b>${recall}</b><span>remembered</span>
+        <small>${s.reviews ? "when cards came back" : "once cards come back"}</small></div>
+    </div>
+    ${calendarHtml(s.days, today)}
+    <h3>What you know</h3>
+    <p class="muted">Countries you'd very likely still get right in two weeks. Tap one to colour the globe.</p>
+    ${knownHtml(today)}
+    <div id="stats-key">${knowledgeKey(knowledge)}</div>
+    <p class="muted"><b>Remembered</b> is how many cards you still knew when they came back, of those you'd
+      got right before, over the last ${STATS_DAYS} days. The schedule aims for about 9 in 10, bringing each card
+      back just before you'd forget it, so a few misses are part of the plan.</p>
+    <button class="btn primary" id="back">Back</button>`;
+
+  // A day in the calendar, pointed at or tapped: its count in the line below.
+  const grid = $(".calendar");
+  const note = $("#cal-note");
+  const summary = note.textContent;
+  grid.addEventListener("pointerover", (e) => {
+    const cell = (e.target as HTMLElement).closest<HTMLElement>("[data-date]");
+    if (cell) note.textContent = dayNote(cell.dataset.date!, today, Number(cell.dataset.n), Number(cell.dataset.new));
+  });
+  grid.addEventListener("pointerleave", (e) => {
+    // On a touch screen the finger lifting counts as leaving; keep the tapped day showing.
+    if (e.pointerType === "mouse") note.textContent = summary;
+  });
+
+  panel.querySelectorAll<HTMLButtonElement>("[data-group]").forEach((b) => {
+    b.onclick = () => {
+      globeMode = globeMode === b.dataset.group ? null : b.dataset.group!;
+      panel.querySelectorAll("[data-group]").forEach((o) => o.setAttribute("aria-pressed", String(o === b && !!globeMode)));
+      $("#stats-key").innerHTML = knowledgeKey(colourGlobe());
+    };
+  });
+  panel.querySelectorAll<SVGSVGElement>("svg.spark").forEach(followSparkline);
+  $("#back").onclick = showHome;
+}
+
+/** The calendar of answers per day, with a line under it that shows a day's count when pointed at. */
+function calendarHtml(days: Map<string, { answers: number; new: number }>, today: string) {
+  const weeks = calendar(days, today, CALENDAR_WEEKS);
+  const shown = weeks.flat().filter((d) => !d.future);
+  const typical = typicalDay(shown);
+  const played = shown.filter((d) => d.answers).length;
+  const total = shown.reduce((sum, d) => sum + d.answers, 0);
+
+  // A column is labelled with its month when the month changes; the first only if there's room.
+  const month = (w: number) => weeks[w][0].date.slice(0, 7);
+  const labelled = weeks.map((_, w) => w > 0 && month(w) !== month(w - 1));
+  const firstChange = labelled.indexOf(true);
+  labelled[0] = firstChange === -1 || firstChange >= 3;
+
+  const cell = (d: CalendarDay) =>
+    d.future
+      ? `<i class="day future"></i>`
+      : `<i class="day s${shade(d.answers, typical)}${d.date === today ? " today" : ""}" data-date="${d.date}"
+          data-n="${d.answers}" data-new="${d.new}"></i>`;
+  const columns = weeks.map(
+    (week, w) => `<span class="cal-month">${labelled[w] ? monthName(week[0].date) : ""}</span>${week.map(cell).join("")}`,
+  );
+  const summary = `${total} ${total === 1 ? "answer" : "answers"} on ${played} ${played === 1 ? "day" : "days"} in the last six months.`;
+  return `<div class="calendar-wrap">
+    <div class="calendar" style="--weeks:${CALENDAR_WEEKS}" aria-hidden="true">${columns.join("")}</div>
+    <div class="cal-foot">
+      <span id="cal-note">${summary}</span>
+      <span class="cal-key" aria-hidden="true">Less ${[0, 1, 2, 3, 4].map((n) => `<i class="day s${n}"></i>`).join("")} More</span>
+    </div>
+  </div>`;
+}
+
+/** "Mon 3 Nov: 42 answers, 8 new" */
+function dayNote(date: string, today: string, answers: number, fresh: number) {
+  const day = date === today ? "Today" : shortDate(date, true);
+  const count = answers === 0 ? "no answers" : answers === 1 ? "1 answer" : `${answers} answers`;
+  return `${day}: ${count}${fresh ? `, ${fresh} new` : ""}`;
+}
+
+/**
+ * A tile per group of question types (as on the globe): countries known, out of how many, and,
+ * once there are a few days to go on, a line of how that has grown and the change in the last week.
+ */
+function knownHtml(today: string) {
+  const history = deck.knownHistory().filter(([date]) => daysBetween(date, today) <= KNOWN_DAYS_SHOWN);
+  const tiles = deck.knownNow().map(({ id, label, known, of }) => {
+    const series = history.flatMap(([date, counts]): [string, number][] => (counts[id] === undefined ? [] : [[date, counts[id]]]));
+    const moved = change(series, today);
+    const line = moved
+      ? `${moved.by > 0 ? "+" : moved.by < 0 ? "−" : ""}${moved.by ? Math.abs(moved.by) : "no change"} since ${shortDate(moved.since)}`
+      : "";
+    return `<button class="known" data-group="${id}" aria-pressed="${id === globeMode}">
+      <span class="known-label">${label}</span>
+      <span class="known-count"><b>${known}</b> of ${of}</span>
+      ${series.length >= 2 ? sparkline(series) : ""}
+      <span class="known-change">${line}</span>
+    </button>`;
+  });
+  const tracked = history.length >= 2;
+  return `<div class="known-grid">${tiles.join("")}</div>
+    ${tracked ? "" : `<p class="muted">Counting from today. A line of how each one grows fills in as you play.</p>`}`;
+}
+
+/** A small line chart of `series`, scaled to fit, with the points kept for `followSparkline`. */
+function sparkline(series: [string, number][]) {
+  const [first] = series[0];
+  const span = Math.max(1, daysBetween(first, series[series.length - 1][0]));
+  const values = series.map(([, v]) => v);
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  // A change of one or two shouldn't fill the whole height.
+  if (hi - lo < 6) {
+    const mid = (hi + lo) / 2;
+    [lo, hi] = [mid - 3, mid + 3];
+  }
+  const points = series.map(([date, v]) => [(100 * daysBetween(first, date)) / span, 26 - (22 * (v - lo)) / (hi - lo)]);
+  const path = points.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`).join("");
+  return `<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"
+      data-points='${JSON.stringify(series.map(([date, v], i) => [date, v, points[i][0]]))}'>
+    <path d="${path}" />
+    <line class="spark-at" y1="0" y2="30" visibility="hidden" />
+  </svg>`;
+}
+
+/** Pointing along a sparkline shows the count on that day in place of the change under it. */
+function followSparkline(svg: SVGSVGElement) {
+  const points: [string, number, number][] = JSON.parse(svg.dataset.points!);
+  const marker = svg.querySelector<SVGLineElement>(".spark-at")!;
+  const label = svg.parentElement!.querySelector(".known-change")!;
+  const usual = label.textContent;
+  svg.addEventListener("pointermove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const x = (100 * (e.clientX - box.left)) / box.width;
+    const [date, value, at] = points.reduce((best, p) => (Math.abs(p[2] - x) < Math.abs(best[2] - x) ? p : best));
+    marker.setAttribute("x1", String(at));
+    marker.setAttribute("x2", String(at));
+    marker.setAttribute("visibility", "visible");
+    label.textContent = `${shortDate(date)}: ${value}`;
+  });
+  svg.addEventListener("pointerleave", () => {
+    marker.setAttribute("visibility", "hidden");
+    label.textContent = usual;
+  });
+}
+
+/** "3 Nov", or "Mon 3 Nov" with the weekday. Always in English, like the rest of the game. */
+function shortDate(date: string, weekday = false) {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(weekday && { weekday: "short" }) });
+}
+
+/** "Nov" for "2026-11-03". */
+function monthName(date: string) {
+  const [y, m] = date.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "short" });
 }
 
 // ---------------------------------------------------------------- settings
