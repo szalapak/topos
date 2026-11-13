@@ -1,5 +1,5 @@
 import "./style.css";
-import { AnswerSet, type Verdict } from "./answers";
+import { AnswerSet, normalize, type Verdict } from "./answers";
 import { loadWorld, nearness, type Country, type World } from "./data";
 import {
   AMOUNT_TYPES,
@@ -13,7 +13,14 @@ import {
   type QuestionType,
 } from "./deck";
 import { countQuiz } from "./counter";
-import { amountHeadline, identicalFlagFeedback, wrongFeedback } from "./feedback";
+import {
+  amountHeadline,
+  ballparkHeadline,
+  identicalFlagFeedback,
+  rightHeadline,
+  wrongFeedback,
+  type RightAnswer,
+} from "./feedback";
 import { Globe } from "./globe";
 import { SKILLS, skillInfo, type Skill } from "./knowledge";
 import { identicalFlags } from "./mixups";
@@ -42,6 +49,8 @@ interface Session {
   quiz?: QuizRun;
   /** True once the player has been asked to do a few more before stopping. */
   nudged?: boolean;
+  /** Right answers in a row, for "Hat-trick" and friends. */
+  streak: number;
 }
 
 interface QuizRun {
@@ -235,7 +244,7 @@ function knowledgeKey(knowledge: Map<string, Knowledge>) {
 }
 
 function startRound() {
-  session = { answered: 0, correct: 0, recent: [] };
+  session = { answered: 0, correct: 0, recent: [], streak: 0 };
   nextQuestion();
 }
 
@@ -288,10 +297,11 @@ function nextQuestion() {
       globe.onTap = (shape, x, y) => {
         // Near-misses count: a few pixels over a border, or a little further when the tap
         // lands in open sea next to an island country.
-        const hitTarget = shape?.id === country.id || globe.isNear(country.id, x, y, shape ? 6 : 14);
-        if (hitTarget) {
+        const onTarget = shape?.id === country.id;
+        if (onTarget || globe.isNear(country.id, x, y, shape ? 6 : 14)) {
           globe.onTap = undefined;
-          return finish(prompt, { result: "exact" });
+          // Only on the neighbour's side of the border: "By a whisker".
+          return finish(prompt, { result: "exact" }, { whisker: !onTarget && !!shape });
         }
         // A tap on open ocean is usually a slip, so it does not count as an answer.
         if (!shape) return;
@@ -393,12 +403,24 @@ interface AnswerDetail {
   guess?: number;
   /** The country named for a flag all but identical to the right one, which counts as close. */
   sameFlag?: string;
+  /** A tap that only counted thanks to the allowance at borders. */
+  whisker?: boolean;
+  /** Right answers in a row, this one included. */
+  streak?: number;
+  /** Right, after a miss the last time this card came up. */
+  redeemed?: boolean;
+  /** Turned right with "I was right". */
+  overruled?: boolean;
 }
 
 function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
   const s = session!;
   const right = verdict.result !== "wrong";
   const grade: Grade = verdict.result === "exact" ? Rating.Good : verdict.result === "close" ? Rating.Hard : Rating.Again;
+  // Read before the answer goes into the deck's history.
+  const redeemed = right && deck.lastWasMiss(prompt.key);
+  const streakBefore = s.streak;
+  s.streak = right ? streakBefore + 1 : 0;
   let overrule: () => void;
   if (s.quiz) {
     const run = s.quiz;
@@ -420,7 +442,11 @@ function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
   s.answered++;
   if (right) s.correct++;
   s.recent = [prompt.country.id, ...s.recent.filter((id) => id !== prompt.country.id)].slice(0, RECENT_KEPT);
-  showFeedback(prompt, verdict, detail, overrule);
+  const overruleAndKeepStreak = () => {
+    overrule();
+    s.streak = streakBefore + 1;
+  };
+  showFeedback(prompt, verdict, { ...detail, streak: s.streak, redeemed }, overruleAndKeepStreak);
 }
 
 /** `overrule` turns the answer into a correct one, for the "I was right" button. */
@@ -443,8 +469,12 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
   // A flag named instead that looks much like this one, to show the two side by side.
   let pairedFlag = sameFlag;
   if (amount) ({ headline, detail } = amountFeedback(prompt, verdict, answer));
-  else if (verdict.result === "exact") headline = `<p class="verdict good">Correct</p>`;
-  else if (sameFlag) {
+  else if (verdict.result === "exact") {
+    // The full name or capital, not a short form ("Bosnia") or another accepted spelling.
+    const full = type === "capital" ? country.capitals : [country.name];
+    const typedInFull = !!typed && full.some((f) => normalize(f) === normalize(typed));
+    headline = `<p class="verdict good">${esc(rightHeadline({ ...rightOf(prompt, answer), typedInFull }))}</p>`;
+  } else if (sameFlag) {
     const same = identicalFlagFeedback(country);
     headline = `<p class="verdict close">${esc(same.headline)}</p>`;
     detail = same.detail;
@@ -491,21 +521,30 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
     $("#overrule").onclick = () => {
       overrule();
       session!.correct++;
-      showFeedback(prompt, { result: "exact" }, { typed }, () => {});
+      showFeedback(prompt, { result: "exact" }, { typed, overruled: true }, () => {});
     };
   }
 }
 
+/** What a right answer's headline goes by, from the prompt and how it was answered. */
+function rightOf({ country, type, isNew }: Prompt, answer: AnswerDetail): RightAnswer {
+  const { streak = 0, redeemed, whisker, overruled } = answer;
+  return { type, country, streak, redeemed, whisker, isNew, overruled };
+}
+
 /** Feedback for a population or GDP answer: the real figure and how far off the guess was. */
-function amountFeedback({ country, type }: Prompt, verdict: Verdict, { skipped, guess }: AnswerDetail) {
+function amountFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail) {
+  const { country, type } = prompt;
+  const { skipped, guess } = answer;
   const population = type === "population";
   const figure = (population ? country.population : country.gdpPerCapita)!;
   const format = population ? formatPopulation : formatDollars;
+  const ratio = guess === undefined ? undefined : guess / figure.value;
   const headline =
     verdict.result === "exact"
-      ? `<p class="verdict good">Correct</p>`
+      ? `<p class="verdict good">${esc(rightHeadline({ ...rightOf(prompt, answer), ratio }))}</p>`
       : verdict.result === "close"
-        ? `<p class="verdict close">Close</p>`
+        ? `<p class="verdict close">${esc(ballparkHeadline())}</p>`
         : `<p class="verdict bad">${esc(amountHeadline(skipped ? undefined : guess, figure.value, type))}</p>`;
   const what = population ? `The population of ${the(country.name)}` : `GDP per capita in ${the(country.name)}`;
   let detail = `${esc(what)} is <b>${format(figure.value)}</b> (World Bank, ${esc(figure.year)}).`;
@@ -601,6 +640,7 @@ function startQuiz() {
     answered: 0,
     correct: 0,
     recent: [],
+    streak: 0,
     quiz: { quiz, graded: [], applied: 0, remembered: 0, missed: 0, length: quizChoice.length },
   };
   nextQuestion();
@@ -695,7 +735,7 @@ function showQuizResults() {
   if (offerMore) {
     $("#narrow").onclick = () => {
       quiz.extend(NARROW_MORE);
-      session = { answered: 0, correct: 0, recent: [], quiz: run };
+      session = { answered: 0, correct: 0, recent: [], streak: 0, quiz: run };
       nextQuestion();
     };
   }

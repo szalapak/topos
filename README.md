@@ -54,7 +54,9 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
   name (Slovakia for Slovenia), the country's capital instead of the country, a city often
   taken for the capital (Sydney), the wrong continent, or a plain miss. Number answers get
   headlines by how far off they were. Naming a flag that is all but identical to the right
-  one (Chad for Romania) counts as close, with a "spot the difference".
+  one (Chad for Romania) counts as close, with a "spot the difference". Right answers get
+  headlines too: for a streak, a miss put right, a tap at the very edge, a hard spelling, a
+  number within 3%, or an obscure, famous or new card.
 - `src/mixups.ts` holds the hand-made lists behind that: twin names, look-alike and
   near-identical flags, countries in two continents, and cities often taken for the capital,
   each with a note on why.

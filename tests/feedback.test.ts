@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normalize } from "../src/answers.ts";
 import { buildWorld, nearness } from "../src/data.ts";
-import { amountHeadline, classify, identicalFlagFeedback, WORDINGS, wrongFeedback, type WrongAnswer } from "../src/feedback.ts";
+import {
+  amountHeadline,
+  classify,
+  identicalFlagFeedback,
+  rightHeadline,
+  WORDINGS,
+  wrongFeedback,
+  type RightAnswer,
+  type WrongAnswer,
+} from "../src/feedback.ts";
 import { capitalTrap, continentOf, identicalFlags, LISTS, lookalikeFlags, nameTwins } from "../src/mixups.ts";
 
 const read = (file: string) => JSON.parse(readFileSync(new URL(`../public/data/${file}`, import.meta.url), "utf8"));
@@ -23,7 +32,8 @@ test("the mix-up lists only name countries in the game, and each pair once", () 
     }
   }
   for (const t of LISTS.CAPITAL_TRAPS) assert.ok(world.byId.has(t.country), `${t.country} is not a country`);
-  for (const id of LISTS.TRANSCONTINENTAL) assert.ok(world.byId.has(id), `${id} is not a country`);
+  for (const id of [...LISTS.TRANSCONTINENTAL, ...LISTS.TRICKY_CAPITALS, ...LISTS.TRICKY_NAMES])
+    assert.ok(world.byId.has(id), `${id} is not a country`);
   // Near-identical flags are look-alikes too, so a miss between them still shows both.
   for (const [a, b] of LISTS.IDENTICAL_FLAGS) assert.ok(lookalikeFlags(a, b), `${a} ${b}`);
 });
@@ -177,4 +187,40 @@ test("number headlines follow how far off the guess was", () => {
   assert.ok(wrong.includes(amountHeadline(250, 100, "population")));
   assert.ok(high.includes(amountHeadline(1000, 100, "gdpPerCapita")));
   assert.ok(low.includes(amountHeadline(10, 100, "gdpPerCapita")));
+});
+
+test("right answers get a headline for what made them notable, rarest first", () => {
+  const { RIGHT_HEADLINES: R } = WORDINGS;
+  const right = (id: string, more: Partial<RightAnswer> = {}, random = () => 0.9) =>
+    rightHeadline({ type: "locate", country: country(id), streak: 1, ...more }, random);
+  // Mexico is neither famous nor obscure, so it gets a plain one.
+  assert.ok(R.correct.includes(right("MEX")));
+  assert.ok(R.overruled.includes(right("MEX", { overruled: true, streak: 3 })));
+  assert.ok(R.three.includes(right("MEX", { streak: 3, redeemed: true })));
+  assert.ok(R.five.includes(right("MEX", { streak: 5 })));
+  assert.equal(right("MEX", { streak: 10 }), "Ten in a row. Who are you?");
+  assert.ok([...R.more, "15 in a row"].includes(right("MEX", { streak: 15 })));
+  assert.ok(R.correct.includes(right("MEX", { streak: 12 })));
+  assert.ok(R.redeemed.includes(right("MEX", { redeemed: true, whisker: true })));
+  assert.ok(R.whisker.includes(right("MEX", { whisker: true })));
+  // Spelling counts only for the hard ones, typed in full.
+  assert.ok(R.spelling.includes(right("BFA", { type: "capital", typedInFull: true })));
+  assert.ok(R.spelling.includes(right("KGZ", { type: "identify", typedInFull: true })));
+  assert.ok(!R.spelling.includes(right("MEX", { type: "capital", typedInFull: true })));
+  assert.ok(!R.spelling.includes(right("BFA", { type: "capital" })));
+  assert.ok(R.bangOn.includes(right("MEX", { type: "population", ratio: 1.02 })));
+  assert.ok(R.correct.includes(right("MEX", { type: "population", ratio: 1.1 })));
+  // Obscure, new and famous cards get theirs only some of the time.
+  assert.ok(R.obscure.includes(right("TUV", {}, () => 0)));
+  assert.ok(R.correct.includes(right("TUV", {}, () => 0.9)));
+  assert.ok(R.isNew.includes(right("MEX", { isNew: true }, () => 0)));
+  assert.ok(R.famous.includes(right("CHN", {}, () => 0)));
+  assert.ok(!R.famous.includes("Well, yes"));
+});
+
+test("right-answer headlines read properly", () => {
+  for (const h of [...Object.values(WORDINGS.RIGHT_HEADLINES).flat(), ...WORDINGS.BALLPARK]) {
+    assert.match(h, /^[A-Z][A-Za-z ,'.?!-]+$/, h);
+    assert.doesNotMatch(h, /[–—]|\s\s/, h);
+  }
 });

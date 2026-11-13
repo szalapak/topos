@@ -5,7 +5,7 @@
  */
 
 import type { QuestionType } from "./deck";
-import { capitalTrap, continentOf, lookalikeFlags, nameTwins } from "./mixups.ts";
+import { capitalTrap, continentOf, lookalikeFlags, nameTwins, trickySpelling } from "./mixups.ts";
 import { esc, listing, oneOf, sentence, stop, the } from "./text.ts";
 
 /** How a wrong answer went wrong. */
@@ -338,5 +338,88 @@ export function amountHeadline(guess: number | undefined, actual: number, type: 
   return oneOf("amount:wrong", AMOUNT_HEADLINES.wrong);
 }
 
+/** What can make a right answer worth a special headline. */
+export interface RightAnswer {
+  type: QuestionType;
+  country: { id: string; rank: number };
+  /** Right answers in a row this round, this one included. */
+  streak: number;
+  /** The last answer to this card was a miss. */
+  redeemed?: boolean;
+  /** A tap that only counted thanks to the allowance at borders. */
+  whisker?: boolean;
+  /** The full name or capital typed, spelt right, rather than a short form or a forgiven typo. */
+  typedInFull?: boolean;
+  /** The first time this card has come up. */
+  isNew?: boolean;
+  /** For a number: the guess divided by the real figure. */
+  ratio?: number;
+  /** Turned right with "I was right". */
+  overruled?: boolean;
+}
+
+const RIGHT_HEADLINES = {
+  correct: ["Correct", "Nailed it", "Spot on", "Bingo", "Textbook", "Look at you", "Yay!", "Woohoo!"],
+  overruled: ["Fair enough", "Our mistake"],
+  three: ["Hat-trick", "Three in a row"],
+  five: ["High five", "Five in a row"],
+  ten: ["Ten in a row. Who are you?"],
+  more: ["On a roll", "Unstoppable"],
+  redeemed: ["Redemption", "Got it this time", "Lesson learnt"],
+  whisker: ["By a whisker", "Just about", "We'll count it"],
+  spelling: ["Spelt it and everything", "Even the spelling"],
+  bangOn: ["Bang on", "Suspiciously accurate", "Did you look that up?"],
+  obscure: ["Ooh, deep cut", "Show-off", "Not many get that one", "Someone's been studying"],
+  isNew: ["Knew that already", "Didn't even need us"],
+  famous: ["Obviously", "Freebie", "Correct, obviously", "That was easy, wasn't it?"],
+};
+
+/** Countries this high in the "how well known" order are freebies (China to Italy)... */
+const FAMOUS_BELOW = 12;
+/** ...and from this far down, deep cuts (Mauritius, Eswatini, Tuvalu). */
+const OBSCURE_FROM = 150;
+/** A number within this ratio either way is bang on. */
+const BANG_ON = 1.03;
+/** How often the headline for an obscure, famous or new card shows instead of a plain one. */
+const SOMETIMES = 0.5;
+
+/**
+ * The headline after a right answer: a plain one, or one for what made it notable, rarest first
+ * (a streak, then a miss put right, a tap at the edge, the spelling, a number spot on). Obscure,
+ * famous and new cards get theirs only some of the time, since they come up a lot.
+ */
+export function rightHeadline(a: RightAnswer, random: () => number = Math.random): string {
+  const pick = (kind: keyof typeof RIGHT_HEADLINES) => oneOf(`right:${kind}`, RIGHT_HEADLINES[kind]);
+  if (a.overruled) return pick("overruled");
+  if (a.streak === 3) return pick("three");
+  if (a.streak === 5) return pick("five");
+  if (a.streak === 10) return pick("ten");
+  if (a.streak > 10 && a.streak % 5 === 0) return oneOf("right:more", [...RIGHT_HEADLINES.more, `${a.streak} in a row`]);
+  if (a.redeemed) return pick("redeemed");
+  if (a.whisker) return pick("whisker");
+  if (a.typedInFull && trickySpelling(a.country.id, a.type === "capital")) return pick("spelling");
+  if (a.ratio !== undefined && a.ratio <= BANG_ON && a.ratio >= 1 / BANG_ON) return pick("bangOn");
+  const { rank } = a.country;
+  const notable = rank >= OBSCURE_FROM ? "obscure" : a.isNew ? "isNew" : rank < FAMOUS_BELOW ? "famous" : undefined;
+  if (notable && random() < SOMETIMES) return pick(notable);
+  return pick("correct");
+}
+
+const BALLPARK = ["Close enough", "Ballpark", "Right ballpark"];
+
+/** The headline for a number close enough to count, but not spot on. */
+export function ballparkHeadline(): string {
+  return oneOf("ballpark", BALLPARK);
+}
+
 /** Every wording, for the tests. */
-export const WORDINGS = { HEADLINES, SKIPPED, DETAILS, AMOUNT_HEADLINES, IDENTICAL_HEADLINES, IDENTICAL_DETAILS };
+export const WORDINGS = {
+  HEADLINES,
+  SKIPPED,
+  DETAILS,
+  AMOUNT_HEADLINES,
+  IDENTICAL_HEADLINES,
+  IDENTICAL_DETAILS,
+  RIGHT_HEADLINES,
+  BALLPARK,
+};

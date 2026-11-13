@@ -45,6 +45,13 @@ const FLAG_LOOKALIKES: [string, string][] = [
  */
 const IDENTICAL_FLAGS: [string, string][] = [["TCD", "ROU"], ["IDN", "MCO"], ["NLD", "LUX"]];
 
+/** Capitals and country names that are hard to spell, praised when typed in full. */
+const TRICKY_CAPITALS = new Set([
+  "BFA", "MDG", "CIV", "HND", "MNG", "TKM", "MMR", "MRT", "SVN", "ISL", "BTN", "TON", "PLW", "KGZ",
+  "TJK", "GEO", "MDA", "BRN", "SUR", "TCD",
+]);
+const TRICKY_NAMES = new Set(["KGZ", "LIE", "PHL", "COL", "DJI", "AZE", "SYC", "TKM", "BIH", "VCT"]);
+
 /** Countries in more than one continent, which are never said to be on the wrong one. */
 const TRANSCONTINENTAL = new Set(["RUS", "TUR", "KAZ", "EGY", "AZE", "GEO", "ARM", "CYP", "IDN", "PAN"]);
 
@@ -99,6 +106,11 @@ export function identicalFlags(a: string, b: string): boolean {
   return identical.has(key(a, b));
 }
 
+/** Whether this country's capital (or, asking for the country, its name) is hard to spell. */
+export function trickySpelling(country: string, capital: boolean): boolean {
+  return (capital ? TRICKY_CAPITALS : TRICKY_NAMES).has(country);
+}
+
 /**
  * The continent a country is in, with the Americas split into North (including Central America
  * and the Caribbean) and South. Undefined for countries in more than one.
@@ -121,4 +133,12 @@ export function capitalTrap(country: string, typed: string): { city: string; not
 }
 
 /** Everything listed here, for the tests. */
-export const LISTS = { NAME_TWINS, FLAG_LOOKALIKES, IDENTICAL_FLAGS, TRANSCONTINENTAL, CAPITAL_TRAPS };
+export const LISTS = {
+  NAME_TWINS,
+  FLAG_LOOKALIKES,
+  IDENTICAL_FLAGS,
+  TRANSCONTINENTAL,
+  TRICKY_CAPITALS,
+  TRICKY_NAMES,
+  CAPITAL_TRAPS,
+};

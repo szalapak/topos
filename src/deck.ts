@@ -389,6 +389,11 @@ export class Deck {
     return result;
   }
 
+  /** Whether the last answer to this card was a miss. */
+  lastWasMiss(key: string): boolean {
+    return this.missedInARow.has(key);
+  }
+
   /** Records an answer. Returns an undo token so a wrong verdict can be overruled. */
   answer(prompt: Prompt, grade: Grade): () => void {
     const before = this.state.cards[prompt.key];
