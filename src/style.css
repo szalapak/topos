@@ -357,6 +357,33 @@ form.answer .unit {
   color: var(--bad);
 }
 
+.flag-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.flag-pair figure {
+  margin: 0;
+}
+
+.flag-pair img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.flag-pair figcaption {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  font-size: 14px;
+}
+
 .facts {
   display: grid;
   grid-template-columns: 72px 1fr;

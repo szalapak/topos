@@ -1,6 +1,6 @@
 import "./style.css";
 import { AnswerSet, type Verdict } from "./answers";
-import { loadWorld, type Country, type World } from "./data";
+import { loadWorld, nearness, type Country, type World } from "./data";
 import {
   AMOUNT_TYPES,
   Deck,
@@ -12,11 +12,14 @@ import {
   type Prompt,
   type QuestionType,
 } from "./deck";
+import { amountHeadline, identicalFlagFeedback, wrongFeedback } from "./feedback";
 import { Globe } from "./globe";
 import { SKILLS, skillInfo, type Skill } from "./knowledge";
+import { identicalFlags } from "./mixups";
 import { describeMiss, formatDollars, formatPopulation, gradeAmount, readDollars, readPopulation } from "./numbers";
 import { Quiz, QUIZ_LENGTHS, quizSize, type QuizLength, type SkillResult } from "./quiz";
 import { calendar, change, dateKey, daysBetween, shade, summarize, typicalDay, type CalendarDay } from "./stats";
+import { esc, oneOf, stop, the } from "./text";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 const panel = $("#panel");
@@ -322,7 +325,12 @@ function nextQuestion() {
         e.preventDefault();
         if (!input.value.trim()) return;
         const set = type === "capital" ? capitals : names;
-        finish(prompt, set.check(country.id, input.value), { typed: input.value.trim() });
+        const verdict = set.check(country.id, input.value);
+        const typed = input.value.trim();
+        // Chad for Romania is as good as anyone can do from the picture.
+        const twin = type === "flag" && verdict.result === "wrong" ? verdict.matchedKey : undefined;
+        if (twin && identicalFlags(country.id, twin)) finish(prompt, { result: "close" }, { typed, sameFlag: twin });
+        else finish(prompt, verdict, { typed });
       };
       $("#skip").onclick = () => finish(prompt, { result: "wrong" }, { skipped: true });
       break;
@@ -379,6 +387,8 @@ interface AnswerDetail {
   tappedId?: string;
   /** The number read from a typed population or GDP answer. */
   guess?: number;
+  /** The country named for a flag all but identical to the right one, which counts as close. */
+  sameFlag?: string;
 }
 
 function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
@@ -412,24 +422,29 @@ function finish(prompt: Prompt, verdict: Verdict, detail: AnswerDetail = {}) {
 /** `overrule` turns the answer into a correct one, for the "I was right" button. */
 function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, overrule: () => void) {
   const { country, type } = prompt;
-  const { skipped, typed, tappedId } = answer;
+  const { skipped, typed, tappedId, sameFlag } = answer;
   const right = verdict.result !== "wrong";
   const onGlobe = type === "locate" || type === "capitalLocate";
+  // The country tapped instead, or whose name or capital was typed.
+  const otherId = verdict.result === "wrong" ? (tappedId ?? verdict.matchedKey) : undefined;
   updateCounts();
 
-  globe.setHighlights([
-    [country.id, right ? "correct" : "target"],
-    ...(tappedId && !right ? [[tappedId, "wrong"] as [string, "wrong"]] : []),
-  ]);
+  globe.setHighlights([[country.id, right ? "correct" : "target"], ...(otherId ? [[otherId, "wrong"] as [string, "wrong"]] : [])]);
   globe.flyTo(country.id);
 
   const expected = type === "capital" ? country.capitals.join(" / ") : country.name;
   const amount = (AMOUNT_TYPES as readonly QuestionType[]).includes(type);
   let headline: string;
   let detail = "";
+  // A flag named instead that looks much like this one, to show the two side by side.
+  let pairedFlag = sameFlag;
   if (amount) ({ headline, detail } = amountFeedback(prompt, verdict, answer));
   else if (verdict.result === "exact") headline = `<p class="verdict good">Correct</p>`;
-  else if (verdict.result === "close") {
+  else if (sameFlag) {
+    const same = identicalFlagFeedback(country);
+    headline = `<p class="verdict close">${esc(same.headline)}</p>`;
+    detail = same.detail;
+  } else if (verdict.result === "close") {
     const spelt = `${esc(expected)}${stop(expected)}`;
     headline = `<p class="verdict close">${oneOf("misspelt", [
       `Correct, more or less. It's spelt ${spelt}`,
@@ -437,37 +452,28 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
       `We'll allow it. It's spelt ${spelt}`,
     ])}</p>`;
   } else {
-    headline = wrongHeadline(skipped);
-    const target = esc(sentence(the(country.name)));
-    const answer = `<b>${esc(expected)}</b>${stop(expected)}`;
-    const matched = verdict.matched;
-    if (onGlobe && matched) {
-      detail = oneOf("tapped", [
-        `That's ${esc(the(matched))}. ${target} is in orange.`,
-        `That's ${esc(the(matched))}: right planet, wrong country. ${target} is in orange.`,
-        `${esc(sentence(the(matched)))}, as it happens. ${target} is the one in orange.`,
-      ]);
-    } else if (onGlobe) detail = `${target} is in orange.`;
-    else if (matched && type === "capital") {
-      const said = esc(typed ?? "");
-      detail = oneOf("otherCapital", [
-        `${said} is the capital of ${esc(the(matched))}. The answer is ${answer}`,
-        `Good capital, wrong country. ${said} belongs to ${esc(the(matched))}; the answer is ${answer}`,
-        `${esc(sentence(the(matched)))} would agree with you. The answer is ${answer}`,
-      ]);
-    } else if (matched) {
-      detail = oneOf("otherCountry", [
-        `That's a different country. The answer is ${answer}`,
-        `A real country, just not this one. The answer is ${answer}`,
-        `To be fair, ${esc(the(matched))} does exist. The answer is ${answer}`,
-      ]);
-    } else detail = `The answer is ${answer}`;
+    const matched = verdict.result === "wrong" ? verdict.matched : undefined;
+    const otherCountry = otherId ? world.byId.get(otherId) : undefined;
+    const wrong = wrongFeedback({
+      type,
+      country,
+      skipped,
+      typed,
+      other: matched ? { ...otherCountry, id: otherId, name: matched } : undefined,
+      near: otherId ? nearness(world, country.id, otherId) : undefined,
+      typedCapital: !!typed && (type === "identify" || type === "flag") && capitals.check(country.id, typed).result !== "wrong",
+    });
+    headline = `<p class="verdict bad">${esc(wrong.headline)}</p>`;
+    detail = wrong.detail;
+    if (wrong.miss === "lookalike") pairedFlag = otherId;
   }
+  const paired = pairedFlag ? world.byId.get(pairedFlag) : undefined;
 
   // Overruling only makes sense for typed names, e.g. a spelling the game does not know. A
   // number is shown back as it was read, so there is nothing to overrule.
   const canOverrule = !right && !skipped && !onGlobe && !amount;
   panel.innerHTML = `${headline}${detail ? `<p>${detail}</p>` : ""}
+    ${paired ? flagPair(country, paired) : ""}
     ${factsCard(country)}
     <div class="row">
       <button class="btn primary" id="next">Next</button>
@@ -496,11 +502,20 @@ function amountFeedback({ country, type }: Prompt, verdict: Verdict, { skipped, 
       ? `<p class="verdict good">Correct</p>`
       : verdict.result === "close"
         ? `<p class="verdict close">Close</p>`
-        : wrongHeadline(skipped);
+        : `<p class="verdict bad">${esc(amountHeadline(skipped ? undefined : guess, figure.value))}</p>`;
   const what = population ? `The population of ${the(country.name)}` : `GDP per capita in ${the(country.name)}`;
   let detail = `${esc(what)} is <b>${format(figure.value)}</b> (World Bank, ${esc(figure.year)}).`;
   if (guess !== undefined) detail += ` You said ${format(guess)}, ${describeMiss(guess, figure.value)}.`;
   return { headline, detail };
+}
+
+/** This flag next to the look-alike that was named instead, to learn the difference from. */
+function flagPair(asked: Country, named: Country) {
+  const figure = (c: Country, label: string) => `<figure>
+      <img src="${flagUrl(c)}" alt="Flag of ${esc(c.name)}">
+      <figcaption><strong>${esc(c.name)}</strong><span class="muted">${label}</span></figcaption>
+    </figure>`;
+  return `<div class="flag-pair">${figure(asked, "This flag")}${figure(named, "Your answer")}</div>`;
 }
 
 function factsCard(c: Country) {
@@ -515,13 +530,6 @@ function factsCard(c: Country) {
     <span class="muted">${esc(c.subregion || c.region)}</span>
     <span class="muted">${figures.join(" · ")}</span>
   </div>`;
-}
-
-/** Headlines for a wrong answer, one picked at random each time. */
-const WRONG_HEADLINES = ["Nope", "Not quite", "Afraid not", "Alas", "No such luck"];
-
-function wrongHeadline(skipped?: boolean) {
-  return `<p class="verdict bad">${skipped ? "Here it is" : oneOf("wrong", WRONG_HEADLINES)}</p>`;
 }
 
 // ---------------------------------------------------------------- quiz
@@ -1093,42 +1101,6 @@ function showSettings() {
 
 function flagUrl(c: Country) {
   return `${import.meta.env.BASE_URL}flags/${c.cca2}.svg`;
-}
-
-const TAKES_THE = new Set([
-  "United States", "United Kingdom", "United Arab Emirates", "Netherlands", "Philippines", "Bahamas",
-  "Gambia", "Maldives", "Comoros", "Solomon Islands", "Marshall Islands", "Dominican Republic",
-  "Central African Republic", "Republic of the Congo", "DR Congo",
-]);
-
-/** "the Netherlands" in running text; the name alone stays bare in headings and answers. */
-function the(name: string) {
-  return TAKES_THE.has(name) ? `the ${name}` : name;
-}
-
-function sentence(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** The full stop for a sentence ending in `s`, unless `s` already has one ("Washington, D.C."). */
-function stop(s: string) {
-  return s.endsWith(".") ? "" : ".";
-}
-
-/** The version last picked from each set by `oneOf`. */
-const lastPicked = new Map<string, number>();
-
-/** One of `versions` at random, never the same one twice in a row from the same `set`. */
-function oneOf(set: string, versions: string[]) {
-  const skip = versions.length > 1 ? lastPicked.get(set) : undefined;
-  let i = Math.floor(Math.random() * (versions.length - (skip === undefined ? 0 : 1)));
-  if (skip !== undefined && i >= skip) i++;
-  lastPicked.set(set, i);
-  return versions[i];
-}
-
-function esc(s: string) {
-  return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
 init().catch((err) => {

@@ -30,6 +30,8 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
 - `scripts/build-data.mjs` builds `public/data/` and `public/flags/` from npm packages and the
   World Bank API. Run `npm run data` to refresh population and GDP figures.
 - `src/data.ts` loads the map and country facts, and prepares lighter outlines for drawing.
+  It also works out which countries are neighbours, by a shared border or across up to
+  250 km of sea with no other country in between.
 - `src/globe.ts` draws the globe on a canvas and handles dragging, zooming and tapping.
 - `src/deck.ts` holds the cards, schedules them with FSRS (`ts-fsrs`) and saves progress.
 - `src/knowledge.ts` models what a player knows: a logistic item response model (as in
@@ -46,6 +48,16 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
   mistaken for another country or capital.
 - `src/numbers.ts` reads typed numbers ("34m", "34 million", "45k"), grades them by how close
   they are, and formats figures for display.
+- `src/feedback.ts` words the feedback after a wrong answer, by question type and by how it
+  went wrong: the country next door, a look-alike flag (shown next to the right one), a twin
+  name (Slovakia for Slovenia), the country's capital instead of the country, a city often
+  taken for the capital (Sydney), the wrong continent, or a plain miss. Number answers get
+  headlines by how far off they were. Naming a flag that is all but identical to the right
+  one (Chad for Romania) counts as close, with a "spot the difference".
+- `src/mixups.ts` holds the hand-made lists behind that: twin names, look-alike and
+  near-identical flags, countries in two continents, and cities often taken for the capital,
+  each with a note on why.
+- `src/text.ts` has small text helpers ("the Netherlands", picking a wording at random).
 - `src/stats.ts` works out the stats screen's numbers from the answer log: answers per day for
   the calendar, streaks, the daily average, and how often cards are remembered when they come
   back. How many countries are known is recorded once a day in the saved progress (`days` in

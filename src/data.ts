@@ -1,6 +1,6 @@
-import { feature, merge } from "topojson-client";
+import { feature, merge, neighbors } from "topojson-client";
 import { filter, filterWeight, presimplify, simplify, sphericalRingArea, sphericalTriangleArea } from "topojson-simplify";
-import { geoArea, geoCentroid, geoDistance } from "d3-geo";
+import { geoArea, geoCentroid, geoContains, geoDistance, geoInterpolate } from "d3-geo";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { GeometryCollection, Topology } from "topojson-specification";
 
@@ -63,6 +63,8 @@ export interface World {
   byId: Map<string, Country>;
   shapes: Shape[];
   shapeById: Map<string, Shape>;
+  /** Map shapes that share a land border, by id. */
+  borders: Map<string, Set<string>>;
 }
 
 type Piece = GeometryCollection<{ name: string; piece: string }>["geometries"][number];
@@ -75,7 +77,11 @@ export async function loadWorld(): Promise<World> {
     fetch(`${base}data/world.json`).then((r) => r.json() as Promise<Topology>),
     fetch(`${base}data/countries.json`).then((r) => r.json() as Promise<Omit<Country, "rank">[]>),
   ]);
+  return buildWorld(topo, raw);
+}
 
+/** The world from the map and the country facts, as loaded by `loadWorld`. */
+export function buildWorld(topo: Topology, raw: Omit<Country, "rank">[]): World {
   const countries: Country[] = raw.map((c, rank) => ({ ...c, rank }));
   const byId = new Map(countries.map((c) => [c.id, c]));
 
@@ -132,7 +138,82 @@ export async function loadWorld(): Promise<World> {
   }
 
   const shapeById = new Map(shapes.filter((s) => s.id).map((s) => [s.id!, s]));
-  return { countries, byId, shapes, shapeById };
+  return { countries, byId, shapes, shapeById, borders: landBorders(topo) };
+}
+
+/** Pieces of the map that share an edge belong to countries with a land border. */
+function landBorders(topo: Topology): Map<string, Set<string>> {
+  const geometries = (topo.objects.countries as GeometryCollection).geometries;
+  const borders = new Map<string, Set<string>>();
+  neighbors(geometries).forEach((others, i) => {
+    const a = geometries[i].id;
+    for (const j of others) {
+      const b = geometries[j].id;
+      if (a == null || b == null || a === b) continue;
+      if (!borders.has(String(a))) borders.set(String(a), new Set());
+      borders.get(String(a))!.add(String(b));
+    }
+  });
+  return borders;
+}
+
+/** Sea gaps up to this wide make neighbours: France and the UK, Japan and South Korea, Cuba and Haiti. */
+const SEA_GAP_KM = 250;
+const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Countries whose main parts are further apart than this are never neighbours, even if an
+ * overseas territory touches the other one: France borders Brazil through French Guiana, and
+ * Mayotte is next to Comoros, but nobody tapping Brazil for France was nearly right. The
+ * furthest real pair is Russia and Poland, about 4,300 km apart.
+ */
+const OVERSEAS_KM = 6000;
+
+/** Whether two countries share a land border, or face each other across a short stretch of sea. */
+export function nearness(world: World, a: string, b: string): "border" | "sea" | undefined {
+  const sa = world.shapeById.get(a);
+  const sb = world.shapeById.get(b);
+  if (!sa || !sb || a === b) return undefined;
+  if (geoDistance(sa.centroid, sb.centroid) * EARTH_RADIUS_KM > OVERSEAS_KM) return undefined;
+  if (world.borders.get(a)?.has(b)) return "border";
+  return acrossTheWater(world, sa, sb, SEA_GAP_KM / EARTH_RADIUS_KM) ? "sea" : undefined;
+}
+
+/**
+ * Whether two shapes come within `limit` radians of each other with no third country in
+ * between, so Slovenia and Slovakia (Austria and Hungary between them) are not neighbours. Uses
+ * the coarsest outlines, which are a few kilometres out at most, and compares only the points
+ * that could be near the other shape at all, so it takes a few milliseconds even for Russia.
+ */
+function acrossTheWater(world: World, a: Shape, b: Shape, limit: number): boolean {
+  if (geoDistance(a.bound.center, b.bound.center) - a.bound.radius - b.bound.radius > limit) return false;
+  const nearOther = (s: Shape, other: Shape) =>
+    outlinePoints(s).filter((p) => geoDistance(p, other.bound.center) <= other.bound.radius + limit);
+  const pb = nearOther(b, a);
+  let best: { p: [number, number]; q: [number, number]; d: number } | undefined;
+  for (const p of nearOther(a, b)) {
+    for (const q of pb) {
+      const d = geoDistance(p, q);
+      if (d <= limit && d < (best?.d ?? Infinity)) best = { p, q, d };
+    }
+  }
+  if (!best) return false;
+  // Look along the shortest gap for land belonging to anyone else.
+  const along = geoInterpolate(best.p, best.q);
+  return [0.25, 0.5, 0.75].every((t) => {
+    const point = along(t);
+    return !world.shapes.some(
+      (s) => s !== a && s !== b && geoDistance(point, s.bound.center) <= s.bound.radius && geoContains(s.feature, point),
+    );
+  });
+}
+
+/** Every point of a shape's coarsest outline, or its centre for a country too small for the map. */
+function outlinePoints(s: Shape): [number, number][] {
+  const g = s.outlines[0].geometry;
+  const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+  const points = polys.flatMap((poly) => poly.flatMap((ring) => ring as [number, number][]));
+  return points.length ? points : [s.centroid];
 }
 
 function boundingCircle(f: Feature<Polygon | MultiPolygon>): Shape["bound"] {
