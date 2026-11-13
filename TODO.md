@@ -134,6 +134,12 @@ Only tested in a desktop browser at phone size so far. Check:
   (`applyQuiz`, `refreshEstimate`). Both need `localStorage` faked in Node, and `src/deck.ts`
   imports without `.ts` extensions, which Node needs.
 - **Accessibility**: globe questions need a pointer. A keyboard alternative would help.
+- **"That one is kinda obvious, no?"** when a capital question is missed or skipped and the
+  capital is basically the country's name. Checking whether the capital contains the country's
+  name, or the other way round, finds 14: Mexico City, Guatemala City, Kuwait City, Panama
+  City, Vatican City, Singapore, Luxembourg, Monaco, Djibouti, San Marino, Andorra la Vella,
+  Tunis, Bissau and São Tomé. Brasília and Algiers could be added by hand. It works for both
+  ways round: typing the capital, and finding the country with that capital.
 - **How to tell look-alike flags apart**: a one-line tell under the side-by-side flags for the
   most common pairs, e.g. Ireland has green at the flagpole and Côte d'Ivoire orange, Senegal
   is Mali plus a green star.
