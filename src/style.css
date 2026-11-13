@@ -18,7 +18,8 @@
   --globe-marker: #d8ccad;
   --globe-target: #f0a830;
   --globe-correct: #4caf73;
-  --globe-wrong: #e0654f;
+  /* Raspberry rather than orange-red, so it stands apart from the orange answer next to it. */
+  --globe-wrong: #c8336b;
   --globe-known: #3a9e96;
   --globe-learning: #a6d3cb;
   --globe-weak: #d29ab3;
@@ -47,7 +48,7 @@
     --globe-marker: #55666e;
     --globe-target: #f0a830;
     --globe-correct: #45b46d;
-    --globe-wrong: #e0654f;
+    --globe-wrong: #e0487f;
     --globe-known: #52c7bb;
     --globe-learning: #3f8784;
     --globe-weak: #a2668a;

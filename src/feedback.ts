@@ -107,8 +107,21 @@ const WRONG = [
 ];
 const NEAR = ["So close", "Nearly", "Not quite", "Just missed", "Ooh, warm"];
 
-const HEADLINES: Record<Miss, string[]> = {
-  skipped: ["Here it is"],
+/**
+ * After "I don't know", by question type: "Here it is" answers "Where is France?", but not
+ * "Which country has this flag?".
+ */
+const SKIPPED: Record<QuestionType, string[]> = {
+  locate: ["Here it is", "Right here", "Allow me"],
+  capitalLocate: ["It's this one", "This one", "Allow me"],
+  identify: ["Now you know", "Allow me", "Let me introduce you"],
+  flag: ["Now you know", "Allow me", "It's this one"],
+  capital: ["Now you know", "Allow me"],
+  population: ["Now you know", "Allow me"],
+  gdpPerCapita: ["Now you know", "Allow me"],
+};
+
+const HEADLINES: Record<Exclude<Miss, "skipped">, string[]> = {
   lookalike: ["So close", "Nearly", "Not quite", "Spot the difference"],
   twin: ["Easy mix-up", "Classic mix-up", "The other one", "Wrong twin"],
   border: NEAR,
@@ -275,7 +288,7 @@ export function wrongFeedback(a: WrongAnswer): { miss: Miss; headline: string; d
   const details = DETAILS[mode][miss] ?? DETAILS[mode].unknown;
   return {
     miss,
-    headline: oneOf(`headline:${miss}`, HEADLINES[miss]),
+    headline: miss === "skipped" ? skippedHeadline(a.type) : oneOf(`headline:${miss}`, HEADLINES[miss]),
     detail: oneOf(`detail:${mode}:${miss}`, details)(parts),
   };
 }
@@ -310,9 +323,14 @@ const AMOUNT_HEADLINES = {
   wrong: WRONG,
 };
 
-/** The headline after a wrong population or GDP answer, by how far off it was. */
-export function amountHeadline(guess: number | undefined, actual: number): string {
-  if (guess === undefined) return HEADLINES.skipped[0];
+/** The headline after "I don't know". */
+export function skippedHeadline(type: QuestionType): string {
+  return oneOf(`skipped:${type}`, SKIPPED[type]);
+}
+
+/** The headline after a wrong population or GDP answer, by how far off it was, or a skip. */
+export function amountHeadline(guess: number | undefined, actual: number, type: QuestionType): string {
+  if (guess === undefined) return skippedHeadline(type);
   const ratio = guess / actual;
   if (ratio <= AMOUNT_NEAR && ratio >= 1 / AMOUNT_NEAR) return oneOf("amount:near", AMOUNT_HEADLINES.near);
   if (ratio >= AMOUNT_FAR) return oneOf("amount:high", AMOUNT_HEADLINES.high);
@@ -321,4 +339,4 @@ export function amountHeadline(guess: number | undefined, actual: number): strin
 }
 
 /** Every wording, for the tests. */
-export const WORDINGS = { HEADLINES, DETAILS, AMOUNT_HEADLINES, IDENTICAL_HEADLINES, IDENTICAL_DETAILS };
+export const WORDINGS = { HEADLINES, SKIPPED, DETAILS, AMOUNT_HEADLINES, IDENTICAL_HEADLINES, IDENTICAL_DETAILS };

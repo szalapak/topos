@@ -121,6 +121,15 @@ test("feedback names what went wrong and the right answer", () => {
   }
 });
 
+test("skipping is worded for the question: only finding a country says \"Here it is\"", () => {
+  for (let i = 0; i < 10; i++) {
+    assert.ok(WORDINGS.SKIPPED.locate.includes(wrongFeedback(ask("locate", "FRA", { skipped: true })).headline));
+    for (const type of ["capitalLocate", "flag", "identify", "capital"] as const) {
+      assert.notEqual(wrongFeedback(ask(type, "FRA", { skipped: true })).headline, "Here it is", type);
+    }
+  }
+});
+
 test("every wording reads properly: no dashes, nothing missing, the answer included", () => {
   const parts = {
     other: "Croatia",
@@ -134,6 +143,7 @@ test("every wording reads properly: no dashes, nothing missing, the answer inclu
   };
   const headlines = [
     ...Object.values(WORDINGS.HEADLINES),
+    ...Object.values(WORDINGS.SKIPPED),
     ...Object.values(WORDINGS.AMOUNT_HEADLINES),
     WORDINGS.IDENTICAL_HEADLINES,
   ].flat();
@@ -161,10 +171,10 @@ test("continents split the Americas, and leave out countries in two", () => {
 
 test("number headlines follow how far off the guess was", () => {
   const { near, high, low, wrong } = WORDINGS.AMOUNT_HEADLINES;
-  assert.equal(amountHeadline(undefined, 100), "Here it is");
-  assert.ok(near.includes(amountHeadline(140, 100)));
-  assert.ok(near.includes(amountHeadline(70, 100)));
-  assert.ok(wrong.includes(amountHeadline(250, 100)));
-  assert.ok(high.includes(amountHeadline(1000, 100)));
-  assert.ok(low.includes(amountHeadline(10, 100)));
+  assert.ok(WORDINGS.SKIPPED.population.includes(amountHeadline(undefined, 100, "population")));
+  assert.ok(near.includes(amountHeadline(140, 100, "population")));
+  assert.ok(near.includes(amountHeadline(70, 100, "population")));
+  assert.ok(wrong.includes(amountHeadline(250, 100, "population")));
+  assert.ok(high.includes(amountHeadline(1000, 100, "gdpPerCapita")));
+  assert.ok(low.includes(amountHeadline(10, 100, "gdpPerCapita")));
 });

@@ -506,7 +506,7 @@ function amountFeedback({ country, type }: Prompt, verdict: Verdict, { skipped, 
       ? `<p class="verdict good">Correct</p>`
       : verdict.result === "close"
         ? `<p class="verdict close">Close</p>`
-        : `<p class="verdict bad">${esc(amountHeadline(skipped ? undefined : guess, figure.value))}</p>`;
+        : `<p class="verdict bad">${esc(amountHeadline(skipped ? undefined : guess, figure.value, type))}</p>`;
   const what = population ? `The population of ${the(country.name)}` : `GDP per capita in ${the(country.name)}`;
   let detail = `${esc(what)} is <b>${format(figure.value)}</b> (World Bank, ${esc(figure.year)}).`;
   if (guess !== undefined) detail += ` You said ${format(guess)}, ${describeMiss(guess, figure.value)}.`;
