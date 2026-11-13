@@ -13,7 +13,8 @@ player is: right answers go into long-term memory, and cards the player very lik
 filled in, to be checked sooner the less sure the estimate is.
 
 Everything runs in the browser. Progress is stored in that browser's local storage, and can be
-moved between devices with the export and import buttons in Settings.
+moved between devices with the export and import buttons in Settings. Visits and quiz scores
+are counted anonymously with GoatCounter.
 
 ## Running it
 
@@ -57,6 +58,11 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
 - `src/mixups.ts` holds the hand-made lists behind that: twin names, look-alike and
   near-identical flags, countries in two continents, and cities often taken for the capital,
   each with a note on why.
+- `src/counter.ts` sends finished quiz results to GoatCounter (topos.goatcounter.com, loaded in
+  `index.html`, which also counts visits), rounded down to tens, for a histogram of how many
+  countries people know. Players don't see it yet. No cookies, nothing that identifies anyone,
+  and localhost is never counted. To leave out your own visits on the live site, open it once
+  with `#toggle-goatcounter` at the end of the address in each browser.
 - `src/text.ts` has small text helpers ("the Netherlands", picking a wording at random).
 - `src/stats.ts` works out the stats screen's numbers from the answer log: answers per day for
   the calendar, streaks, the daily average, and how often cards are remembered when they come

@@ -12,6 +12,7 @@ import {
   type Prompt,
   type QuestionType,
 } from "./deck";
+import { countQuiz } from "./counter";
 import { amountHeadline, identicalFlagFeedback, wrongFeedback } from "./feedback";
 import { Globe } from "./globe";
 import { SKILLS, skillInfo, type Skill } from "./knowledge";
@@ -52,6 +53,9 @@ interface QuizRun {
   /** What the deck made of them so far, over every "narrow it down". */
   remembered: number;
   missed: number;
+  length: QuizLength;
+  /** Set once the results have been counted, so "narrow it down" doesn't count them again. */
+  counted?: boolean;
 }
 
 let session: Session | null = null;
@@ -593,7 +597,12 @@ function showQuizSetup() {
 
 function startQuiz() {
   const quiz = new Quiz(deck.model, quizChoice.skills, quizChoice.length, (id, type) => !!deck.prompt(id, type));
-  session = { answered: 0, correct: 0, recent: [], quiz: { quiz, graded: [], applied: 0, remembered: 0, missed: 0 } };
+  session = {
+    answered: 0,
+    correct: 0,
+    recent: [],
+    quiz: { quiz, graded: [], applied: 0, remembered: 0, missed: 0, length: quizChoice.length },
+  };
   nextQuestion();
 }
 
@@ -615,6 +624,10 @@ function showQuizResults() {
   updateCounts();
 
   const results = quiz.results();
+  if (!run.counted) {
+    run.counted = true;
+    countQuiz(results, run.length);
+  }
   const [main, ...others] = results;
   const areas = quiz.areas();
   const edge = edgeOf(quiz, main.skill);
@@ -1045,6 +1058,8 @@ function showSettings() {
     <fieldset><legend>Your data</legend>
       <p class="muted">Progress is saved in this browser only. To move it to another device, export it
         here and import the file there.</p>
+      <p class="muted">Visits and quiz scores are counted anonymously with GoatCounter, without
+        cookies, to see how many countries people know.</p>
       <div class="row">
         <button class="btn" id="export">Export progress</button>
         <button class="btn" id="import">Import progress</button>

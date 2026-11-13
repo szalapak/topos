@@ -33,5 +33,9 @@ owner's real email stays out of the public history. Keep it that way.
 - **Testing in the preview browser**: modules can be imported in the page console, e.g.
   `await import('/src/deck.ts')`, which is handy for simulating many answers quickly. Clear
   `localStorage` afterwards so test progress does not linger.
+- **Counting**: `index.html` loads GoatCounter, and finished quizzes send events named like
+  `quiz/map/medium/first/120-129` (`src/counter.ts`). Renaming a skill, a quiz length or the
+  path's shape splits the data collected so far. GoatCounter ignores localhost, so testing in
+  the preview browser sends nothing.
 - **Drawing speed**: the globe redraws on every frame while moving, so keep per-frame work in
   `src/globe.ts` small. It uses coarser outlines while moving and skips off-screen countries.
