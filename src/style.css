@@ -23,6 +23,8 @@
   --globe-known: #3a9e96;
   --globe-learning: #a6d3cb;
   --globe-weak: #d29ab3;
+  /* Outline round sparkles, so white ones show on the pale map. */
+  --globe-spark-edge: rgba(27, 38, 48, 0.45);
 
   color-scheme: light;
 }
@@ -52,6 +54,7 @@
     --globe-known: #52c7bb;
     --globe-learning: #3f8784;
     --globe-weak: #a2668a;
+    --globe-spark-edge: rgba(230, 237, 242, 0.5);
 
     color-scheme: dark;
   }
@@ -148,6 +151,15 @@ body {
 
 #globe:active {
   cursor: grabbing;
+}
+
+/* Sparkles after a right answer, drawn over the globe (src/globe.ts). */
+.globe-fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .zoom {

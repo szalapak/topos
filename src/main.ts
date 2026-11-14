@@ -13,6 +13,7 @@ import {
   type QuestionType,
 } from "./deck";
 import { countQuiz } from "./counter";
+import { flagColors } from "./flagcolors";
 import {
   amountHeadline,
   ballparkHeadline,
@@ -461,6 +462,8 @@ function showFeedback(prompt: Prompt, verdict: Verdict, answer: AnswerDetail, ov
 
   globe.setHighlights([[country.id, right ? "correct" : "target"], ...(otherId ? [[otherId, "wrong"] as [string, "wrong"]] : [])]);
   globe.flyTo(country.id);
+  // Sparkles in the flag's colours. The flag comes from the offline cache, so there is no wait.
+  if (right) void flagColors(flagUrl(country)).then((colors) => globe.celebrate(country.id, colors));
 
   const expected = type === "capital" ? country.capitals.join(" / ") : country.name;
   const amount = (AMOUNT_TYPES as readonly QuestionType[]).includes(type);

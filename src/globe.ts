@@ -3,6 +3,7 @@ import type { GeoPath, GeoPermissibleObjects, GeoProjection } from "d3-geo";
 import type { Position } from "geojson";
 import { DETAIL_LEVELS, type Shape, type World } from "./data";
 import type { Knowledge } from "./deck";
+import { drawBurst, makeBurst, type Burst } from "./sparkles";
 
 export type HighlightKind = "target" | "correct" | "wrong";
 
@@ -13,6 +14,9 @@ const MARKER_RADIUS = 4.5;
 const MARKER_SEA_HIT_PX = 16;
 /** Highlighted shapes narrower than this get a ring drawn around them. */
 const RING_BELOW_PX = 22;
+const RING_RADIUS = 15;
+/** Sparkles for a country still out of sight this long after they were asked for are dropped. */
+const SPARKLE_WAIT_MS = 2000;
 const TAP_SLOP_PX = 7;
 const KNOWLEDGE_LEVELS: Knowledge[] = ["weak", "learning", "known"];
 const MIN_ZOOM = 0.9;
@@ -54,12 +58,23 @@ export class Globe {
   private settleTimer: number | undefined;
   private pointers = new Map<number, { x: number; y: number }>();
   private gesture: Gesture | null = null;
+  /** Sparkles get a canvas of their own on top, so the map is never redrawn just to move them. */
+  private fx: HTMLCanvasElement;
+  private fxCtx: CanvasRenderingContext2D;
+  private fxFrame: number | null = null;
+  /** `start` is set once the country is in sight. */
+  private sparkles: { burst: Burst; asked: number; start?: number } | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
     private world: World,
   ) {
     this.ctx = canvas.getContext("2d")!;
+    this.fx = document.createElement("canvas");
+    this.fx.className = "globe-fx";
+    this.fx.setAttribute("aria-hidden", "true");
+    canvas.after(this.fx);
+    this.fxCtx = this.fx.getContext("2d")!;
     this.projection = geoOrthographic().precision(0.6);
     this.path = geoPath(this.projection, this.ctx);
     this.readColors();
@@ -74,7 +89,29 @@ export class Globe {
 
   setHighlights(entries: [string, HighlightKind][]) {
     this.highlights = new Map(entries);
+    // Moving on stops any sparkles; they fade out with the next frame.
+    this.sparkles = null;
     this.requestRender();
+  }
+
+  /**
+   * Shooting stars in the given colours flying out from a country's border, after a right
+   * answer. Only while the country is shown as right, so sparkles asked for late, after moving
+   * on, are ignored.
+   */
+  celebrate(id: string, colors: string[]) {
+    const shape = this.world.shapeById.get(id);
+    if (!shape || !colors.length || this.highlights.get(id) !== "correct") return;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // Sized for where the globe is heading, as it is usually still flying to the country.
+    const scale = this.baseScale * (this.animation != null ? this.heading.zoom : this.zoom);
+    const placement = {
+      ring: Math.sqrt(shape.area) * scale < RING_BELOW_PX,
+      view: Math.asin(Math.min(1, Math.hypot(this.width, this.height) / 2 / scale)),
+      level: this.detailLevel(scale, false),
+    };
+    this.sparkles = { burst: makeBurst(shape, colors, placement), asked: performance.now() };
+    this.fxFrame ??= requestAnimationFrame(this.fxTick);
   }
 
   /** Colours countries by how well they are known. An empty map shows plain land. */
@@ -172,7 +209,7 @@ export class Globe {
 
   private readColors() {
     const css = getComputedStyle(document.documentElement);
-    for (const key of ["ocean", "graticule", "land", "border", "rim", "target", "correct", "wrong", "marker", "known", "learning", "weak"]) {
+    for (const key of ["ocean", "graticule", "land", "border", "rim", "target", "correct", "wrong", "marker", "known", "learning", "weak", "spark-edge"]) {
       this.colors[key] = css.getPropertyValue(`--globe-${key}`).trim();
     }
   }
@@ -182,8 +219,8 @@ export class Globe {
     this.dpr = window.devicePixelRatio || 1;
     this.width = rect.width;
     this.height = rect.height;
-    this.canvas.width = Math.round(rect.width * this.dpr);
-    this.canvas.height = Math.round(rect.height * this.dpr);
+    this.canvas.width = this.fx.width = Math.round(rect.width * this.dpr);
+    this.canvas.height = this.fx.height = Math.round(rect.height * this.dpr);
     this.baseScale = Math.max(40, Math.min(rect.width, rect.height) / 2 - 12);
     this.requestRender();
   }
@@ -273,7 +310,7 @@ export class Globe {
       }
       if (kind) {
         ctx.beginPath();
-        ctx.arc(p[0], p[1], 15, 0, Math.PI * 2);
+        ctx.arc(p[0], p[1], RING_RADIUS, 0, Math.PI * 2);
         ctx.strokeStyle = colors[kind];
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -285,6 +322,37 @@ export class Globe {
     ctx.strokeStyle = colors.rim;
     ctx.lineWidth = 1.2;
     ctx.stroke();
+
+    // Redrawn with the map, so sparkles keep up with a globe that moves under them.
+    if (this.sparkles) this.drawSparkles();
+  }
+
+  private fxTick = () => {
+    this.fxFrame = null;
+    this.drawSparkles();
+    if (this.sparkles) this.fxFrame = requestAnimationFrame(this.fxTick);
+  };
+
+  private drawSparkles() {
+    const ctx = this.fxCtx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.width, this.height);
+    const s = this.sparkles;
+    if (!s) return;
+    const now = performance.now();
+    const center = this.center();
+    if (s.start == null) {
+      // After a typed answer the country can start on the far side: wait for the globe to bring it round.
+      if (geoDistance(s.burst.shape.centroid, center) < 1) s.start = now;
+      else if (now - s.asked > SPARKLE_WAIT_MS) this.sparkles = null;
+      if (s.start == null) return;
+    }
+    const elapsed = now - s.start;
+    if (elapsed > s.burst.length) {
+      this.sparkles = null;
+      return;
+    }
+    drawBurst(ctx, s.burst, elapsed, { projection: this.projection, center, edge: this.colors["spark-edge"], ringRadius: RING_RADIUS });
   }
 
   /** Shapes that could be on screen: on the near side of the globe and inside the viewport. */
@@ -297,10 +365,10 @@ export class Globe {
   }
 
   /** Coarsest outline whose dropped detail is under about a pixel; one step coarser while moving. */
-  private detailLevel(scale: number): number {
+  private detailLevel(scale: number, moving = this.moving): number {
     const pixelArea = (0.8 / scale) ** 2;
     const level = DETAIL_LEVELS.findIndex((l) => l.weight <= pixelArea);
-    return Math.max(0, level - (this.moving ? 1 : 0));
+    return Math.max(0, level - (moving ? 1 : 0));
   }
 
   private markMoving() {

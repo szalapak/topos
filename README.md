@@ -34,6 +34,11 @@ built-in test runner (Node 24 or newer, which runs TypeScript directly).
   It also works out which countries are neighbours, by a shared border or across up to
   250 km of sea with no other country in between.
 - `src/globe.ts` draws the globe on a canvas and handles dragging, zooming and tapping.
+- `src/sparkles.ts` makes and draws the shooting stars that fly out from a country's border
+  after a right answer. They go on a second canvas over the globe, so the map is never redrawn
+  just to move them, and they are left out when the device asks for reduced motion.
+- `src/flagcolors.ts` finds a flag's main colours for the sparkles by drawing it small and
+  counting its pixels, leaving out small details and the blend where two colours meet.
 - `src/deck.ts` holds the cards, schedules them with FSRS (`ts-fsrs`) and saves progress.
 - `src/knowledge.ts` models what a player knows: a logistic item response model (as in
   adaptive testing) with a level per skill (maps, flags, capitals, population, GDP per capita),

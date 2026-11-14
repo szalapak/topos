@@ -177,3 +177,7 @@ that assumes real knowledge roughly follows fame plus a regional bonus.
 - Right answers get varied headlines (Nov 2026): an everyday pool, plus lines for a streak, a
   miss put right, a tap at the very edge, a hard spelling, a number within 3%, and obscure,
   famous or new cards.
+- Shooting stars in the flag's colours fly out from the country's border after every right
+  answer (Nov 2026, `src/sparkles.ts`). Chosen over a wave of stars running round the border
+  and confetti. Tiny countries sparkle from the ring round their dot; skipped with reduced
+  motion.
