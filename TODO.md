@@ -93,14 +93,6 @@ that assumes real knowledge roughly follows fame plus a regional bonus.
   app icon for now (`og:image`, 512x512); chat apps and social sites show a wide picture best,
   about 1200x630.
 
-### 5. Test properly on a real phone
-Only tested in a desktop browser at phone size so far. Check:
-- pinch to zoom and drag on the globe, and whether tiny-country taps feel fair;
-- the on-screen keyboard: iPhone Safari ignores `interactive-widget=resizes-content`, so the
-  answer box may be hidden behind the keyboard;
-- drawing speed while spinning the globe;
-- "Add to Home Screen" icon and offline use.
-
 ## Later
 
 - **Focused play**: tap a country or pick a continent and be quizzed only on that area, with
@@ -134,12 +126,6 @@ Only tested in a desktop browser at phone size so far. Check:
   (`applyQuiz`, `refreshEstimate`). Both need `localStorage` faked in Node, and `src/deck.ts`
   imports without `.ts` extensions, which Node needs.
 - **Accessibility**: globe questions need a pointer. A keyboard alternative would help.
-- **"That one is kinda obvious, no?"** when a capital question is missed or skipped and the
-  capital is basically the country's name. Checking whether the capital contains the country's
-  name, or the other way round, finds 14: Mexico City, Guatemala City, Kuwait City, Panama
-  City, Vatican City, Singapore, Luxembourg, Monaco, Djibouti, San Marino, Andorra la Vella,
-  Tunis, Bissau and São Tomé. Brasília and Algiers could be added by hand. It works for both
-  ways round: typing the capital, and finding the country with that capital.
 - **How to tell look-alike flags apart**: a one-line tell under the side-by-side flags for the
   most common pairs, e.g. Ireland has green at the flagpole and Côte d'Ivoire orange, Senegal
   is Mali plus a green star.
@@ -185,4 +171,9 @@ Only tested in a desktop browser at phone size so far. Check:
   with the right one), a twin name (Slovakia for Slovenia), the capital typed for the country,
   a city often taken for the capital (Sydney), or the wrong continent. Near-identical flags
   (Chad and Romania, Indonesia and Monaco, the Netherlands and Luxembourg) count as close, with
-  a "spot the difference". Number answers get headlines by how far off they were.
+  a "spot the difference". Number answers get headlines by how far off they were. Missing or
+  skipping a capital that is basically the country's name (Mexico City, Singapore, Tunis and
+  13 more) gets "That one is kinda obvious, no?".
+- Right answers get varied headlines (Nov 2026): an everyday pool, plus lines for a streak, a
+  miss put right, a tap at the very edge, a hard spelling, a number within 3%, and obscure,
+  famous or new cards.

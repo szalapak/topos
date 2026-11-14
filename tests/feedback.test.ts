@@ -13,7 +13,7 @@ import {
   type RightAnswer,
   type WrongAnswer,
 } from "../src/feedback.ts";
-import { capitalTrap, continentOf, identicalFlags, LISTS, lookalikeFlags, nameTwins } from "../src/mixups.ts";
+import { capitalTrap, continentOf, identicalFlags, LISTS, lookalikeFlags, nameTwins, obviousCapital } from "../src/mixups.ts";
 
 const read = (file: string) => JSON.parse(readFileSync(new URL(`../public/data/${file}`, import.meta.url), "utf8"));
 const world = buildWorld(read("world.json"), read("countries.json"));
@@ -157,7 +157,7 @@ test("every wording reads properly: no dashes, nothing missing, the answer inclu
     ...Object.values(WORDINGS.AMOUNT_HEADLINES),
     WORDINGS.IDENTICAL_HEADLINES,
   ].flat();
-  for (const h of headlines) assert.match(h, /^[A-Z][a-z ,'-]+$/, h);
+  for (const h of headlines) assert.match(h, /^[A-Z][a-z ,'?-]+$/, h);
   for (const [mode, byMiss] of Object.entries(WORDINGS.DETAILS)) {
     for (const [miss, wordings] of Object.entries(byMiss)) {
       for (const w of wordings!) {
@@ -222,5 +222,26 @@ test("right-answer headlines read properly", () => {
   for (const h of [...Object.values(WORDINGS.RIGHT_HEADLINES).flat(), ...WORDINGS.BALLPARK]) {
     assert.match(h, /^[A-Z][A-Za-z ,'.?!-]+$/, h);
     assert.doesNotMatch(h, /[–—]|\s\s/, h);
+  }
+});
+
+test("capitals that are basically the country's name are kinda obvious", () => {
+  const obvious = world.countries.filter(obviousCapital).map((c) => c.id).sort();
+  assert.deepEqual(obvious, [
+    "AND", "BRA", "DJI", "DZA", "GNB", "GTM", "KWT", "LUX", "MCO", "MEX", "PAN", "SGP", "SMR", "STP", "TUN", "VAT",
+  ]);
+  // Skipped or missed, on either capital question...
+  assert.equal(classify(ask("capital", "MEX", { skipped: true })), "obvious");
+  assert.equal(classify(ask("capital", "MEX", { typed: "Tegucigalpa", other: other("HND") })), "obvious");
+  assert.equal(classify(ask("capitalLocate", "SGP", { other: other("MYS"), near: "sea" })), "obvious");
+  // ...but not when the question doesn't involve the capital, or the capital isn't a giveaway.
+  assert.equal(classify(ask("locate", "MEX", { skipped: true })), "skipped");
+  assert.equal(classify(ask("identify", "SGP", { skipped: true })), "skipped");
+  assert.equal(classify(ask("capital", "FRA", { skipped: true })), "skipped");
+  for (let i = 0; i < 5; i++) {
+    const tap = wrongFeedback(ask("capitalLocate", "MEX", { skipped: true }));
+    assert.ok(WORDINGS.HEADLINES.obvious.includes(tap.headline), tap.headline);
+    assert.ok(tap.detail.endsWith("Mexico City is in Mexico, shown in orange."), tap.detail);
+    assert.ok(wrongFeedback(ask("capital", "KWT", { skipped: true })).detail.includes("<b>Kuwait City</b>"));
   }
 });

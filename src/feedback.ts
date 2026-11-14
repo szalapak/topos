@@ -5,11 +5,13 @@
  */
 
 import type { QuestionType } from "./deck";
-import { capitalTrap, continentOf, lookalikeFlags, nameTwins, trickySpelling } from "./mixups.ts";
+import { capitalTrap, continentOf, lookalikeFlags, nameTwins, obviousCapital, trickySpelling } from "./mixups.ts";
 import { esc, listing, oneOf, sentence, stop, the } from "./text.ts";
 
 /** How a wrong answer went wrong. */
 export type Miss =
+  /** A capital that is basically the country's name (Mexico City), missed or skipped. */
+  | "obvious"
   /** "I don't know". */
   | "skipped"
   /** A flag much like this one. */
@@ -55,6 +57,8 @@ export interface WrongAnswer {
 }
 
 export function classify(a: WrongAnswer): Miss {
+  // Whatever went wrong, the name gave it away.
+  if ((a.type === "capital" || a.type === "capitalLocate") && obviousCapital(a.country)) return "obvious";
   if (a.skipped) return "skipped";
   const other = a.other?.id;
   if (other && a.type === "flag" && lookalikeFlags(a.country.id, other)) return "lookalike";
@@ -122,6 +126,7 @@ const SKIPPED: Record<QuestionType, string[]> = {
 };
 
 const HEADLINES: Record<Exclude<Miss, "skipped">, string[]> = {
+  obvious: ["That one is kinda obvious, no?", "Kinda obvious, no?", "Bit of a giveaway, that one"],
   lookalike: ["So close", "Nearly", "Not quite", "Spot the difference"],
   twin: ["Easy mix-up", "Classic mix-up", "The other one", "Wrong twin"],
   border: NEAR,
@@ -138,6 +143,11 @@ const HEADLINES: Record<Exclude<Miss, "skipped">, string[]> = {
 const DETAILS: Record<Mode, Partial<Record<Miss, Wording[]>> & { skipped: Wording[]; unknown: Wording[] }> = {
   // Find the country, or the country with this capital, on the globe.
   tap: {
+    // Only for "Which country has the capital Mexico City?".
+    obvious: [
+      (p) => `The clue was in the name. ${p.where}`,
+      (p) => `It's right there in the name. ${p.where}`,
+    ],
     border: [
       (p) => `That's ${p.other}, right next door. ${p.where}`,
       (p) => `Off by one border: that's ${p.other}. ${p.where}`,
@@ -231,6 +241,10 @@ const DETAILS: Record<Mode, Partial<Record<Miss, Wording[]>> & { skipped: Wordin
   },
   // Type the capital.
   capital: {
+    obvious: [
+      (p) => `The clue was in the name. The answer is ${p.answer}`,
+      (p) => `It's right there in the name: ${p.answer}`,
+    ],
     border: [
       (p) => `${p.typed} is just over the border, in ${p.other}. The answer is ${p.answer}`,
       (p) => `Right neighbourhood: ${p.typed} is the capital of ${p.other}, next door. The answer is ${p.answer}`,

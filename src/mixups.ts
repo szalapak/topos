@@ -4,7 +4,7 @@
  * Neighbours by land or sea come from the map instead (`nearness` in `src/data.ts`).
  */
 
-import { AnswerSet } from "./answers.ts";
+import { AnswerSet, normalize } from "./answers.ts";
 
 /** Countries whose names are easily swapped. Keyed by alpha-3 id. */
 const NAME_TWINS: [string, string][] = [
@@ -51,6 +51,23 @@ const TRICKY_CAPITALS = new Set([
   "TJK", "GEO", "MDA", "BRN", "SUR", "TCD",
 ]);
 const TRICKY_NAMES = new Set(["KGZ", "LIE", "PHL", "COL", "DJI", "AZE", "SYC", "TKM", "BIH", "VCT"]);
+
+/** Capitals close to the country's name that the name check below misses. */
+const OBVIOUS_BY_HAND = new Set(["BRA", "DZA"]);
+
+/**
+ * Whether the capital is basically the country's name, which makes missing it "kinda obvious":
+ * one contains the other (Mexico City, Singapore, Tunis, Bissau), or it is listed by hand
+ * (Brasília, Algiers).
+ */
+export function obviousCapital(c: { id: string; name: string; capitals: string[] }): boolean {
+  if (OBVIOUS_BY_HAND.has(c.id)) return true;
+  const name = normalize(c.name);
+  return c.capitals.some((capital) => {
+    const city = normalize(capital);
+    return !!city && (city.includes(name) || name.includes(city));
+  });
+}
 
 /** Countries in more than one continent, which are never said to be on the wrong one. */
 const TRANSCONTINENTAL = new Set(["RUS", "TUR", "KAZ", "EGY", "AZE", "GEO", "ARM", "CYP", "IDN", "PAN"]);
